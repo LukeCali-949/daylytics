@@ -2,19 +2,18 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
 }
 
-model Post {
-    id        Int      @id @default(autoincrement())
-    name      String
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-
-    @@index([name])
+model Day {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID field
+  date      Int
+  daySchema Json     // JSON representation of the day's data
+  createdAt DateTime @default(now()) // Auto-set creation timestamp
+  updatedAt DateTime @updatedAt      // Auto-set last updated timestamp
 }
