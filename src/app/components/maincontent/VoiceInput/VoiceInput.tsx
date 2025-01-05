@@ -54,41 +54,67 @@ export default function VoiceInput() {
       await startRecording();
     }
   };
-
   const submitCurrentDaySchema = async () => {
-    if (!generatedSchema) {
-      console.error("No generated schema to submit.");
-      alert("No generated schema to submit.");
+    if (!transcribedText) {
+      console.error("No transcribed text available.");
+      alert("No transcribed text available.");
       return;
     }
 
-    const testDate = 6; // Hardcoded date for testing purposes
+    const testDate = 7; // Hardcoded date for testing purposes
 
     try {
-      const response = await fetch("/api/db/saveDay", {
+      const response = await fetch("/api/db/processAndSaveDay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          date: testDate,
-          daySchema: generatedSchema,
+          userDescription: transcribedText,
+          date: testDate, // Pass the date as an integer
         }),
       });
 
       const data = await response.json();
       if (response.ok) {
-        console.log("Day schema submitted successfully:", data.day);
-        //alert("Day schema submitted successfully!");
+        //console.log("Day schema generated and saved successfully:", data.day);
+        //alert("Day schema generated and saved successfully!");
         // Refresh the list of all days
         setAllDays((prevDays) => [...prevDays, data.day]);
         setGeneratedSchema(null); // Reset the generated schema after submission
         setTranscribedText(""); // Clear the transcribed text
       } else {
-        console.error("Error submitting day schema:", data.error);
-        alert("Error submitting day schema: " + data.error);
+        console.error("Error processing and saving day schema:", data.error);
+        alert("Error processing and saving day schema: " + data.error);
       }
     } catch (error) {
-      console.error("Error submitting day schema:", error);
-      alert("An error occurred while submitting the day schema.");
+      console.error("Error processing and saving day schema:", error);
+      alert("An error occurred while processing and saving the day schema.");
+    }
+  };
+
+  const generateDayJson = async () => {
+    if (!transcribedText) {
+      console.error("No transcribed text available.");
+      alert("No transcribed text available.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/processDay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userDescription: transcribedText }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setGeneratedSchema(data.schema);
+      } else {
+        console.error("Error generating JSON schema:", data.error);
+        alert("Error generating JSON schema: " + data.error);
+      }
+    } catch (error) {
+      console.error("Error generating JSON schema:", error);
+      alert("An error occurred while generating the JSON schema.");
     }
   };
 
@@ -212,33 +238,6 @@ export default function VoiceInput() {
       setTranscribedText("Failed to process transcription. Please try again.");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const generateDayJson = async () => {
-    if (!transcribedText) {
-      console.error("No transcribed text available.");
-      alert("No transcribed text available.");
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/processDay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userDescription: transcribedText }),
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setGeneratedSchema(data.schema);
-      } else {
-        console.error("Error generating JSON schema:", data.error);
-        alert("Error generating JSON schema: " + data.error);
-      }
-    } catch (error) {
-      console.error("Error generating JSON schema:", error);
-      alert("An error occurred while generating the JSON schema.");
     }
   };
 
