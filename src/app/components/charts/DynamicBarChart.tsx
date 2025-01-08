@@ -12,7 +12,7 @@ interface DynamicBarChartProps {
 
 const DynamicBarChart = ({ keyName, chartData }: DynamicBarChartProps) => {
   return (
-    <div className="mb-6">
+    <div className="mb-6 w-[400px] rounded-lg p-3 shadow-2xl">
       <h4 className="mb-2 text-center font-semibold">
         {formatKeyName(keyName)}
       </h4>

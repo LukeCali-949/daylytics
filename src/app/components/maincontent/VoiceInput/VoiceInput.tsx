@@ -1,3 +1,4 @@
+// components/VoiceInput.tsx
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -5,13 +6,14 @@ import { Mic, MicOff, Loader2 } from "lucide-react";
 import { Textarea } from "~/components/ui/textarea";
 import { Button } from "~/components/ui/button";
 import DynamicLineChart from "../../charts/DynamicLineChart";
+import DynamicBarChart from "../../charts/DynamicBarChart";
 
 export default function VoiceInput() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcribedText, setTranscribedText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [generatedSchema, setGeneratedSchema] = useState<any>(null); // Holds the JSON schema
   const [allDays, setAllDays] = useState<any[]>([]); // Holds all previous day schemas
+  const [chartTypeConfigs, setChartTypeConfigs] = useState<any>({}); // Holds chart type counts
   const [isFetchingDays, setIsFetchingDays] = useState(false); // Loading state for fetching days
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -21,30 +23,59 @@ export default function VoiceInput() {
   const animationFrameRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Fetch the last 7 days' schemas when the component mounts
+  // Fetch the last 7 days' schemas and chart type configs when the component mounts
   useEffect(() => {
-    const fetchLast7Days = async () => {
+    const fetchData = async () => {
       setIsFetchingDays(true);
       try {
-        const response = await fetch("/api/db/getLast7Days", {
+        // Fetch last 7 days
+        const daysResponse = await fetch("/api/db/getLast7Days", {
           method: "GET",
         });
-        const data = await response.json();
-        if (response.ok) {
-          setAllDays(data.days);
+        const daysData = await daysResponse.json();
+        if (daysResponse.ok) {
+          setAllDays(daysData.days);
         } else {
-          console.error("Error fetching last 7 days:", data.error);
-          alert("Error fetching last 7 days' schemas: " + data.error);
+          console.error("Error fetching last 7 days:", daysData.error);
+          alert("Error fetching last 7 days' schemas: " + daysData.error);
+        }
+
+        // Fetch chart type configs
+        const chartConfigResponse = await fetch("/api/db/getChartTypeConfigs", {
+          method: "GET",
+        });
+        const chartConfigData = await chartConfigResponse.json();
+        if (chartConfigResponse.ok) {
+          // Convert array to key-value map for easy access
+          const configMap: {
+            [key: string]: { lineCount: number; barCount: number };
+          } = {};
+          chartConfigData.chartTypeConfigs.forEach((config: any) => {
+            configMap[config.keyName] = {
+              lineCount: config.lineCount,
+              barCount: config.barCount,
+            };
+          });
+          setChartTypeConfigs(configMap);
+        } else {
+          console.error(
+            "Error fetching chart type configs:",
+            chartConfigData.error,
+          );
+          alert(
+            "Error fetching chart type configurations: " +
+              chartConfigData.error,
+          );
         }
       } catch (error) {
-        console.error("Error fetching last 7 days:", error);
-        alert("An error occurred while fetching last 7 days' schemas.");
+        console.error("Error fetching data:", error);
+        alert("An error occurred while fetching data.");
       } finally {
         setIsFetchingDays(false);
       }
     };
 
-    fetchLast7Days();
+    fetchData();
   }, []);
 
   const toggleRecording = async () => {
@@ -54,14 +85,20 @@ export default function VoiceInput() {
       await startRecording();
     }
   };
+
   const submitCurrentDaySchema = async () => {
+    console.log("yo ah ran thru");
     if (!transcribedText) {
       console.error("No transcribed text available.");
       alert("No transcribed text available.");
       return;
     }
 
-    const testDate = 7; // Hardcoded date for testing purposes
+    const today = new Date();
+    const dateInt = 2;
+    //   today.getFullYear() * 10000 +
+    //   (today.getMonth() + 1) * 100 +
+    //   today.getDate(); // Format: YYYYMMDD
 
     try {
       const response = await fetch("/api/db/processAndSaveDay", {
@@ -69,52 +106,53 @@ export default function VoiceInput() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userDescription: transcribedText,
-          date: testDate, // Pass the date as an integer
+          date: dateInt, // Dynamically set the date
         }),
       });
 
       const data = await response.json();
       if (response.ok) {
-        //console.log("Day schema generated and saved successfully:", data.day);
-        //alert("Day schema generated and saved successfully!");
+        console.log("Day schema generated and saved successfully:", data.day);
+
         // Refresh the list of all days
         setAllDays((prevDays) => [...prevDays, data.day]);
-        setGeneratedSchema(null); // Reset the generated schema after submission
-        setTranscribedText(""); // Clear the transcribed text
+
+        // Update chartTypeConfigs based on the new day's chartConfig
+        const newChartConfig = data.chartConfig;
+
+        if (newChartConfig) {
+          const updatedConfig = { ...chartTypeConfigs };
+          const configEntries = Object.entries(
+            newChartConfig as Record<string, string>,
+          );
+          configEntries.forEach(([key, chartType]) => {
+            if (chartType === "Line" || chartType === "Bar") {
+              if (updatedConfig[key]) {
+                if (chartType === "Line") {
+                  updatedConfig[key].lineCount += 1;
+                } else if (chartType === "Bar") {
+                  updatedConfig[key].barCount += 1;
+                }
+              } else {
+                updatedConfig[key] = {
+                  lineCount: chartType === "Line" ? 1 : 0,
+                  barCount: chartType === "Bar" ? 1 : 0,
+                };
+              }
+            }
+          });
+
+          setChartTypeConfigs(updatedConfig);
+        }
+
+        //setTranscribedText(""); // Clear the transcribed text
       } else {
         console.error("Error processing and saving day schema:", data.error);
         alert("Error processing and saving day schema: " + data.error);
       }
     } catch (error) {
-      console.error("Error processing and saving day schema:", error);
+      console.error("Error processing and saving day schemaaa:", error);
       alert("An error occurred while processing and saving the day schema.");
-    }
-  };
-
-  const generateDayJson = async () => {
-    if (!transcribedText) {
-      console.error("No transcribed text available.");
-      alert("No transcribed text available.");
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/processDay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userDescription: transcribedText }),
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setGeneratedSchema(data.schema);
-      } else {
-        console.error("Error generating JSON schema:", data.error);
-        alert("Error generating JSON schema: " + data.error);
-      }
-    } catch (error) {
-      console.error("Error generating JSON schema:", error);
-      alert("An error occurred while generating the JSON schema.");
     }
   };
 
@@ -264,36 +302,57 @@ export default function VoiceInput() {
   const prepareChartData = (key: string) => {
     return allDays.map((day) => ({
       date: `Day ${day.date}`,
-      value: typeof day.daySchema[key] === "number" ? day.daySchema[key] : 0,
+      value:
+        typeof day.daySchema[key]?.value === "number"
+          ? day.daySchema[key].value
+          : 0,
     }));
   };
 
   // Get the keys that qualify for visualization
   const keysToVisualize = getKeysToVisualize();
 
+  // Function to determine chart type based on ChartTypeConfig
+  const getChartType = (key: string): "Line" | "Bar" | null => {
+    const config = chartTypeConfigs[key];
+    if (config) {
+      if (config.lineCount > config.barCount) {
+        return "Line";
+      } else if (config.barCount > config.lineCount) {
+        return "Bar";
+      } else {
+        // If counts are equal, default to Line
+        return "Line";
+      }
+    }
+    return null; // Undefined if no config found
+  };
+
   return (
     <div className="mx-auto w-full space-y-4 p-6">
-      <h2 className="text-center text-2xl font-bold text-gray-800 dark:text-gray-200">
-        Describe Your Day
-      </h2>
-      <div className="relative mx-auto max-w-md">
-        <canvas
-          ref={canvasRef}
-          className="h-32 w-full rounded-md border bg-gray-100"
-        ></canvas>
-        <Textarea
-          value={transcribedText}
-          onChange={(e) => setTranscribedText(e.target.value)}
-          placeholder="Your transcribed text will appear here..."
-          className="mt-4 min-h-[200px] resize-none p-4 text-lg leading-relaxed"
-          disabled={isRecording || isLoading}
-        />
-        {isLoading && (
-          <div className="absolute right-2 top-2 flex items-center space-x-2 text-green-500">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm font-medium">Processing...</span>
-          </div>
-        )}
+      <div className="mx-auto max-w-md">
+        <h2 className="text-center text-2xl font-bold text-gray-800 dark:text-gray-200">
+          Describe Your Day
+        </h2>
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            className="h-32 w-full rounded-md border bg-gray-100"
+          ></canvas>
+          <Textarea
+            value={transcribedText}
+            onChange={(e) => setTranscribedText(e.target.value)}
+            placeholder="Your transcribed text will appear here..."
+            className="mt-4 min-h-[200px] resize-none p-4 text-lg leading-relaxed"
+            disabled={isRecording || isLoading}
+          />
+          {isLoading && (
+            <div className="absolute right-2 top-2 flex items-center space-x-2 text-green-500">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm font-medium">Processing...</span>
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex justify-center space-x-4">
         <Button
@@ -311,35 +370,14 @@ export default function VoiceInput() {
           )}
           {isRecording ? "Stop Recording" : "Start Recording"}
         </Button>
-        {/* <Button
-          onClick={generateDayJson}
-          className="rounded-full bg-green-500 px-6 py-3 text-white hover:bg-green-600"
-        >
-          Generate Day JSON
-        </Button> */}
         <Button
           onClick={submitCurrentDaySchema}
           className="rounded-full bg-green-500 px-6 py-3 text-white hover:bg-green-600"
         >
-          Submit Day Description
+          Generate Day JSON
         </Button>
       </div>
-      {generatedSchema && (
-        <div className="mt-4 space-y-4">
-          <h3 className="text-lg font-semibold">Generated JSON Schema:</h3>
-          <pre className="overflow-auto rounded-md bg-gray-100 p-4 text-sm">
-            {JSON.stringify(generatedSchema, null, 2)}
-          </pre>
-          <div className="flex justify-center">
-            <Button
-              onClick={submitCurrentDaySchema}
-              className="rounded-full bg-blue-500 px-6 py-3 text-white hover:bg-blue-600"
-            >
-              Submit Current Day Schema
-            </Button>
-          </div>
-        </div>
-      )}
+
       {/* <div className="mt-8">
         <h3 className="text-center text-lg font-semibold">
           Previous Days' Schemas
@@ -353,7 +391,7 @@ export default function VoiceInput() {
           </div>
         ) : allDays.length > 0 ? (
           <div className="mt-4 grid w-max grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {allDays.map((day, index) => (
+            {allDays.map((day) => (
               <div
                 key={day.id}
                 className="rounded-md border bg-white p-4 shadow"
@@ -371,20 +409,43 @@ export default function VoiceInput() {
           </p>
         )}
       </div> */}
-      {/* Render LineCharts for qualifying keys */}
+      {/* Render Charts for qualifying keys */}
       {keysToVisualize.length > 0 && (
-        <div className="mx-auto mt-8">
-          <h3 className="text-center text-lg font-semibold">
+        <div className="mt-8">
+          <h3 className="mb-8 text-center text-lg font-semibold">
             Last 7 Days' Trends
           </h3>
-          <div className="flex gap-10">
-            {keysToVisualize.map((key) => (
-              <DynamicLineChart
-                key={key}
-                keyName={key}
-                chartData={prepareChartData(key)}
-              />
-            ))}
+          <div className="ml-[200px] flex gap-5">
+            {keysToVisualize.map((key) => {
+              const chartType = getChartType(key);
+              const chartData = prepareChartData(key);
+              if (chartType === "Line") {
+                return (
+                  <DynamicLineChart
+                    key={key}
+                    keyName={key}
+                    chartData={chartData}
+                  />
+                );
+              } else if (chartType === "Bar") {
+                return (
+                  <DynamicBarChart
+                    key={key}
+                    keyName={key}
+                    chartData={chartData}
+                  />
+                );
+              } else {
+                // Default to LineChart if chartType is undefined
+                return (
+                  <DynamicLineChart
+                    key={key}
+                    keyName={key}
+                    chartData={chartData}
+                  />
+                );
+              }
+            })}
           </div>
         </div>
       )}

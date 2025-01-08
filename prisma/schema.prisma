@@ -11,9 +11,17 @@ datasource db {
 }
 
 model Day {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID field
-  date      Int
-  daySchema Json     // JSON representation of the day's data
-  createdAt DateTime @default(now()) // Auto-set creation timestamp
-  updatedAt DateTime @updatedAt      // Auto-set last updated timestamp
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID field
+  date        Int                                         // Integer date for simplicity (e.g., YYYYMMDD)
+  daySchema   Json                                        // JSON representation of the day's data
+  createdAt   DateTime @default(now())                    // Auto-set creation timestamp
+  updatedAt   DateTime @updatedAt                         // Auto-set last updated timestamp
 }
+
+model ChartTypeConfig {
+  id        String @id @default(auto()) @map("_id") @db.ObjectId
+  keyName   String @unique
+  lineCount Int    @default(0)
+  barCount  Int    @default(0)
+}
+

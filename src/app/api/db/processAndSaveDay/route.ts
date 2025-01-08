@@ -37,57 +37,37 @@ export async function POST(req: NextRequest) {
 
     const existingSchema = lastDay ? lastDay.daySchema : null;
 
-    // Prepare the prompt based on the existence of a previous schema
-    // and instruct the AI to embed a chartType property for each data point.
+    // Prepare the prompt for generating daySchema
     let prompt = "";
-
     if (existingSchema && Object.keys(existingSchema).length > 0) {
-      // Prompt for subsequent days
       prompt = `
         You are an AI assistant that generates JSON schemas based on user descriptions of their day.
-        
+
         Your tasks are:
         1. Extract relevant data points from the user's description.
-        2. Align these data points with the existing schema keys provided.
-        3. Update the existing keys with new values if mentioned in the description.
-        4. Add new keys for any new metrics identified in the description.
-        5. Do not include keys that are not mentioned in the current description.
-        6. For each metric, wrap the numeric value in an object shaped like:
-             {
-                "value": <number>,
-                "chartType": "Line" or "Bar"
-             }
-           Choose "Line" if the data represents a continuous metric over time; 
-           choose "Bar" if the data is more discrete or better represented in a bar format.
-        
-        Ensure all time-related fields are represented as integers in military time (e.g., "7 AM" = 700, "10 PM" = 2200).
-        Maintain consistency in data types and naming conventions.
-        
+        2. Organize these data points into a structured JSON schema.
+        3. Ensure all time-related fields are represented as integers in military time (e.g., "7 AM" = 700, "10 PM" = 2200).
+        4. Maintain consistency in data types and naming conventions.
+        5. For most cases its better to keep property names generalized for future adaptation. For example if a user says in their
+        description, "$15 spent on lunch" the better property name would be "money_spent" and NOT something like "money_spent_on_lunch"
+
+
         **Existing Schema (JSON):**
         ${JSON.stringify(existingSchema, null, 2)}
-        
+
         **User Description:**
         "${userDescription}"
-        
+
         **Example:**
         _User Description_: "I woke up at 8 AM, worked for 6 hours, and went out for dinner."
-        
+
         _Generated JSON Schema_:
         {
-          "wake_up_time": {
-            "value": 800,
-            "chartType": "Line"
-          },
-          "hours_worked": {
-            "value": 6,
-            "chartType": "Line"
-          },
-          "dinner": {
-            "value": 1,
-            "chartType": "Bar"
-          }
+          "wake_up_time": { "value": 800 },
+          "hours_worked": { "value": 6 },
+          "dinner": { "value": 1 }
         }
-        
+
         **Instructions:**
         - Only include keys that are present in the current day's description.
         - Omit any keys from the existing schema that are not mentioned today.
@@ -95,51 +75,31 @@ export async function POST(req: NextRequest) {
         - Ensure the JSON is properly formatted and valid.
       `;
     } else {
-      // Prompt for the first day
       prompt = `
         You are an AI assistant that generates JSON schemas based on user descriptions of their day.
-        
+
         Your tasks are:
         1. Extract relevant data points from the user's description.
         2. Organize these data points into a structured JSON schema.
-        3. Ensure the schema is flexible and easy to extend with new data points in the future.
-        4. For each metric, wrap the numeric value in an object shaped like:
-             {
-                "value": <number>,
-                "chartType": "Line" or "Bar"
-             }
-           Choose "Line" if the data represents a continuous metric over time; 
-           choose "Bar" if the data is more discrete or better represented in a bar format.
-        
-        Ensure all time-related fields are represented as integers in military time (e.g., "7 AM" = 700, "10 PM" = 2200).
-        Maintain consistency in data types and naming conventions.
-        
+        3. Ensure all time-related fields are represented as integers in military time (e.g., "7 AM" = 700, "10 PM" = 2200).
+        4. Maintain consistency in data types and naming conventions.
+        5. For most cases its better to keep property names generalized for future adaptation. For example if a user says in their
+        description, "$15 spent on lunch" the better property name would be "money_spent" and NOT something like "money_spent_on_lunch"
+
         **User Description:**
         "${userDescription}"
-        
+
         **Example:**
         _User Description_: "I woke up at 7 AM, worked for 8 hours, spent $15 on lunch, and went jogging for 30 minutes."
-        
+
         _Generated JSON Schema_:
         {
-          "wake_up_time": {
-            "value": 700,
-            "chartType": "Line"
-          },
-          "hours_worked": {
-            "value": 8,
-            "chartType": "Line"
-          },
-          "money_spent": {
-            "value": 15,
-            "chartType": "Bar"
-          },
-          "exercise": {
-            "value": 30,
-            "chartType": "Bar"
-          }
+          "wake_up_time": { "value": 700 },
+          "hours_worked": { "value": 8 },
+          "money_spent": { "value": 15 },
+          "exercise": { "value": 30 }
         }
-        
+
         **Instructions:**
         - Extract all relevant data points mentioned in the description.
         - Organize them into a clear and consistent JSON structure.
@@ -148,8 +108,8 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
+    // Call OpenAI API for generating daySchema
+    const daySchemaCompletion = await openai.chat.completions.create({
       model: "chatgpt-4o-latest",
       messages: [
         {
@@ -162,40 +122,127 @@ export async function POST(req: NextRequest) {
       response_format: { type: "json_object" },
     });
 
-    // Extract response content
-    const schema = completion.choices[0]?.message?.content;
-    console.log(schema);
-    if (!schema) {
+    const daySchemaResponse = daySchemaCompletion.choices[0]?.message?.content;
+    if (!daySchemaResponse) {
       return NextResponse.json(
-        { error: "Failed to generate schema." },
+        { error: "Failed to generate day schema." },
         { status: 500 },
       );
     }
 
-    // Parse the JSON schema
-    let finalSchema;
+    let daySchema;
     try {
-      finalSchema = JSON.parse(schema);
+      daySchema = JSON.parse(daySchemaResponse);
     } catch (parseError) {
-      console.error("Error parsing JSON schema:", parseError);
-      console.error("Received content:", schema);
+      console.error("Error parsing day schema:", parseError);
       return NextResponse.json(
-        { error: "Invalid JSON schema format received from AI." },
+        { error: "Invalid JSON format for day schema." },
         { status: 500 },
       );
     }
 
-    // Save the new Day document
+    // Prepare prompt for generating chartConfig using the keys from daySchema
+    const keys = Object.keys(daySchema);
+    const chartConfigPrompt = `
+      You are an AI assistant that recommends chart types ("Line" or "Bar") for numerical metrics based their key names.
+        - Use "Line" for continuous metrics over time (e.g., "wake_up_time", "hours_worked").
+        - Use "Bar" for discrete metrics or totals (e.g., "money_spent").
+      Given the following keys: ${JSON.stringify(keys)}
+      However, also the complete description of the user's day might also give some context into what chart type they want so 
+      examine it to see if there are any indicators of such: ${userDescription}
+      Output a JSON object mapping each key to its recommended chart type.
+    `;
+
+    // Call OpenAI API for generating chartConfig
+    const chartConfigCompletion = await openai.chat.completions.create({
+      model: "chatgpt-4o-latest",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an AI assistant that recommends chart types for numerical metrics.",
+        },
+        { role: "user", content: chartConfigPrompt },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const chartConfigResponse =
+      chartConfigCompletion.choices[0]?.message?.content;
+    if (!chartConfigResponse) {
+      return NextResponse.json(
+        { error: "Failed to generate chart configuration." },
+        { status: 500 },
+      );
+    }
+
+    let chartConfig;
+    try {
+      chartConfig = JSON.parse(chartConfigResponse);
+    } catch (parseError) {
+      console.error("Error parsing chartConfig:", parseError);
+      chartConfig = {}; // Fallback to empty config if parsing fails
+    }
+
+    // Save the new Day document without chartConfig embedded
     const newDay = await db.day.create({
       data: {
-        date, // Use the date provided in the request body
-        daySchema: finalSchema,
+        date,
+        daySchema,
       },
     });
 
-    // Return the saved Day document
+    // Update ChartTypeConfig counts based on chartConfig
+    const chartTypeUpdates = Object.entries(chartConfig).map(
+      async ([key, chartType]) => {
+        if (chartType === "Line" || chartType === "Bar") {
+          const existingConfig = await db.chartTypeConfig.findUnique({
+            where: { keyName: key },
+          });
+
+          if (existingConfig) {
+            if (chartType === "Line") {
+              return db.chartTypeConfig.update({
+                where: { keyName: key },
+                data: { lineCount: existingConfig.lineCount + 1 },
+              });
+            } else if (chartType === "Bar") {
+              return db.chartTypeConfig.update({
+                where: { keyName: key },
+                data: { barCount: existingConfig.barCount + 1 },
+              });
+            }
+          } else {
+            if (chartType === "Line") {
+              return db.chartTypeConfig.create({
+                data: {
+                  keyName: key,
+                  lineCount: 1,
+                  barCount: 0,
+                },
+              });
+            } else if (chartType === "Bar") {
+              return db.chartTypeConfig.create({
+                data: {
+                  keyName: key,
+                  lineCount: 0,
+                  barCount: 1,
+                },
+              });
+            }
+          }
+        }
+      },
+    );
+
+    await Promise.all(chartTypeUpdates);
+
     return NextResponse.json(
-      { message: "Day schema generated and saved successfully.", day: newDay },
+      {
+        message: "Day schema generated and saved successfully.",
+        day: newDay,
+        chartConfig,
+      },
       { status: 201 },
     );
   } catch (error: any) {
