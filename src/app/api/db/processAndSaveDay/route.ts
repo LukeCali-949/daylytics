@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     const existingSchema = lastDay ? lastDay.daySchema : null;
 
     // Prepare the prompt based on the existence of a previous schema
+    // and instruct the AI to embed a chartType property for each data point.
     let prompt = "";
 
     if (existingSchema && Object.keys(existingSchema).length > 0) {
@@ -51,6 +52,13 @@ export async function POST(req: NextRequest) {
         3. Update the existing keys with new values if mentioned in the description.
         4. Add new keys for any new metrics identified in the description.
         5. Do not include keys that are not mentioned in the current description.
+        6. For each metric, wrap the numeric value in an object shaped like:
+             {
+                "value": <number>,
+                "chartType": "Line" or "Bar"
+             }
+           Choose "Line" if the data represents a continuous metric over time; 
+           choose "Bar" if the data is more discrete or better represented in a bar format.
         
         Ensure all time-related fields are represented as integers in military time (e.g., "7 AM" = 700, "10 PM" = 2200).
         Maintain consistency in data types and naming conventions.
@@ -66,10 +74,17 @@ export async function POST(req: NextRequest) {
         
         _Generated JSON Schema_:
         {
-          "wake_up_time": 800,
-          "hours_worked": 6,
+          "wake_up_time": {
+            "value": 800,
+            "chartType": "Line"
+          },
+          "hours_worked": {
+            "value": 6,
+            "chartType": "Line"
+          },
           "dinner": {
-            "type": "outing"
+            "value": 1,
+            "chartType": "Bar"
           }
         }
         
@@ -88,6 +103,13 @@ export async function POST(req: NextRequest) {
         1. Extract relevant data points from the user's description.
         2. Organize these data points into a structured JSON schema.
         3. Ensure the schema is flexible and easy to extend with new data points in the future.
+        4. For each metric, wrap the numeric value in an object shaped like:
+             {
+                "value": <number>,
+                "chartType": "Line" or "Bar"
+             }
+           Choose "Line" if the data represents a continuous metric over time; 
+           choose "Bar" if the data is more discrete or better represented in a bar format.
         
         Ensure all time-related fields are represented as integers in military time (e.g., "7 AM" = 700, "10 PM" = 2200).
         Maintain consistency in data types and naming conventions.
@@ -100,12 +122,21 @@ export async function POST(req: NextRequest) {
         
         _Generated JSON Schema_:
         {
-          "wake_up_time": 700,
-          "hours_worked": 8,
-          "money_spent": 15,
+          "wake_up_time": {
+            "value": 700,
+            "chartType": "Line"
+          },
+          "hours_worked": {
+            "value": 8,
+            "chartType": "Line"
+          },
+          "money_spent": {
+            "value": 15,
+            "chartType": "Bar"
+          },
           "exercise": {
-            "type": "jogging",
-            "duration_minutes": 30
+            "value": 30,
+            "chartType": "Bar"
           }
         }
         
@@ -128,7 +159,7 @@ export async function POST(req: NextRequest) {
         },
         { role: "user", content: prompt },
       ],
-      response_format: { type: "json_object" }, // Assuming this is valid as per your context
+      response_format: { type: "json_object" },
     });
 
     // Extract response content
