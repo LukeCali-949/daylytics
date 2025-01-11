@@ -7,6 +7,8 @@ import { Textarea } from "~/components/ui/textarea";
 import { Button } from "~/components/ui/button";
 import DynamicLineChart from "../../charts/DynamicLineChart";
 import DynamicBarChart from "../../charts/DynamicBarChart";
+import DynamicPieChart from "../../charts/DynamicPieChart";
+import { chartComponents } from "../../charts/chartRegistry";
 
 export default function VoiceInput() {
   const [isRecording, setIsRecording] = useState(false);
@@ -87,7 +89,6 @@ export default function VoiceInput() {
   };
 
   const submitCurrentDaySchema = async () => {
-    console.log("yo ah ran thru");
     if (!transcribedText) {
       console.error("No transcribed text available.");
       alert("No transcribed text available.");
@@ -95,10 +96,7 @@ export default function VoiceInput() {
     }
 
     const today = new Date();
-    const dateInt = 2;
-    //   today.getFullYear() * 10000 +
-    //   (today.getMonth() + 1) * 100 +
-    //   today.getDate(); // Format: YYYYMMDD
+    const dateInt = 5;
 
     try {
       const response = await fetch("/api/db/processAndSaveDay", {
@@ -106,52 +104,61 @@ export default function VoiceInput() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userDescription: transcribedText,
-          date: dateInt, // Dynamically set the date
+          date: dateInt,
         }),
       });
 
       const data = await response.json();
       if (response.ok) {
-        console.log("Day schema generated and saved successfully:", data.day);
+        console.log("Day schema processed successfully:", data.day);
 
-        // Refresh the list of all days
-        setAllDays((prevDays) => [...prevDays, data.day]);
+        // Check if chartConfig exists in the response to distinguish creation vs. update
+        if (data.chartConfig) {
+          // New day created
+          alert("Day schema generated and saved successfully!");
+          setAllDays((prevDays) => [...prevDays, data.day]);
 
-        // Update chartTypeConfigs based on the new day's chartConfig
-        const newChartConfig = data.chartConfig;
-
-        if (newChartConfig) {
-          const updatedConfig = { ...chartTypeConfigs };
-          const configEntries = Object.entries(
-            newChartConfig as Record<string, string>,
-          );
-          configEntries.forEach(([key, chartType]) => {
-            if (chartType === "Line" || chartType === "Bar") {
-              if (updatedConfig[key]) {
-                if (chartType === "Line") {
-                  updatedConfig[key].lineCount += 1;
-                } else if (chartType === "Bar") {
-                  updatedConfig[key].barCount += 1;
+          const newChartConfig = data.chartConfig;
+          if (newChartConfig && typeof newChartConfig === "object") {
+            const updatedConfig = { ...chartTypeConfigs };
+            const configEntries = Object.entries(
+              newChartConfig as Record<string, string>,
+            );
+            configEntries.forEach(([key, chartType]) => {
+              if (chartType === "Line" || chartType === "Bar") {
+                if (updatedConfig[key]) {
+                  if (chartType === "Line") {
+                    updatedConfig[key].lineCount += 1;
+                  } else if (chartType === "Bar") {
+                    updatedConfig[key].barCount += 1;
+                  }
+                } else {
+                  updatedConfig[key] = {
+                    lineCount: chartType === "Line" ? 1 : 0,
+                    barCount: chartType === "Bar" ? 1 : 0,
+                  };
                 }
-              } else {
-                updatedConfig[key] = {
-                  lineCount: chartType === "Line" ? 1 : 0,
-                  barCount: chartType === "Bar" ? 1 : 0,
-                };
               }
-            }
-          });
-
-          setChartTypeConfigs(updatedConfig);
+            });
+            setChartTypeConfigs(updatedConfig);
+          }
+        } else {
+          // Existing day updated
+          alert("Day schema updated successfully!");
+          setAllDays((prevDays) =>
+            prevDays.map((day) =>
+              day.date === data.day.date ? data.day : day,
+            ),
+          );
         }
 
-        //setTranscribedText(""); // Clear the transcribed text
+        setTranscribedText(""); // Clear the transcribed text
       } else {
         console.error("Error processing and saving day schema:", data.error);
         alert("Error processing and saving day schema: " + data.error);
       }
     } catch (error) {
-      console.error("Error processing and saving day schemaaa:", error);
+      console.error("Error processing and saving day schema:", error);
       alert("An error occurred while processing and saving the day schema.");
     }
   };
@@ -313,19 +320,19 @@ export default function VoiceInput() {
   const keysToVisualize = getKeysToVisualize();
 
   // Function to determine chart type based on ChartTypeConfig
-  const getChartType = (key: string): "Line" | "Bar" | null => {
+  const getChartType = (key: string): "Line" | "Bar" | "Pie" | null => {
     const config = chartTypeConfigs[key];
     if (config) {
+      // Simplistic heuristic: If counts are equal, choose Pie by default
       if (config.lineCount > config.barCount) {
         return "Line";
       } else if (config.barCount > config.lineCount) {
         return "Bar";
       } else {
-        // If counts are equal, default to Line
-        return "Line";
+        return "Pie";
       }
     }
-    return null; // Undefined if no config found
+    return null;
   };
 
   return (
@@ -374,41 +381,10 @@ export default function VoiceInput() {
           onClick={submitCurrentDaySchema}
           className="rounded-full bg-green-500 px-6 py-3 text-white hover:bg-green-600"
         >
-          Generate Day JSON
+          Submit
         </Button>
       </div>
 
-      {/* <div className="mt-8">
-        <h3 className="text-center text-lg font-semibold">
-          Previous Days' Schemas
-        </h3>
-        {isFetchingDays ? (
-          <div className="mt-4 flex items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
-            <span className="ml-2 text-gray-500">
-              Fetching previous schemas...
-            </span>
-          </div>
-        ) : allDays.length > 0 ? (
-          <div className="mt-4 grid w-max grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {allDays.map((day) => (
-              <div
-                key={day.id}
-                className="rounded-md border bg-white p-4 shadow"
-              >
-                <h4 className="mb-2 font-semibold">Day {day.date}</h4>
-                <pre className="overflow-auto text-sm">
-                  {JSON.stringify(day.daySchema, null, 2)}
-                </pre>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-4 text-center text-gray-500">
-            No previous day schemas found.
-          </p>
-        )}
-      </div> */}
       {/* Render Charts for qualifying keys */}
       {keysToVisualize.length > 0 && (
         <div className="mt-8">
@@ -416,36 +392,25 @@ export default function VoiceInput() {
             Last 7 Days' Trends
           </h3>
           <div className="ml-[200px] flex gap-5">
-            {keysToVisualize.map((key) => {
-              const chartType = getChartType(key);
-              const chartData = prepareChartData(key);
-              if (chartType === "Line") {
-                return (
-                  <DynamicLineChart
-                    key={key}
-                    keyName={key}
-                    chartData={chartData}
-                  />
-                );
-              } else if (chartType === "Bar") {
-                return (
-                  <DynamicBarChart
-                    key={key}
-                    keyName={key}
-                    chartData={chartData}
-                  />
-                );
-              } else {
-                // Default to LineChart if chartType is undefined
-                return (
-                  <DynamicLineChart
-                    key={key}
-                    keyName={key}
-                    chartData={chartData}
-                  />
-                );
-              }
-            })}
+            {keysToVisualize.length > 0 && (
+              <div className="mt-8">
+                <div className="flex gap-5">
+                  {keysToVisualize.map((key) => {
+                    const chartType = getChartType(key) || "Line"; // default if undefined
+                    const ChartComponent =
+                      chartComponents[chartType] || DynamicLineChart;
+                    const chartData = prepareChartData(key);
+                    return (
+                      <ChartComponent
+                        key={key}
+                        keyName={key}
+                        chartData={chartData}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

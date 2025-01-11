@@ -12,7 +12,7 @@ datasource db {
 
 model Day {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID field
-  date        Int                                         // Integer date for simplicity (e.g., YYYYMMDD)
+  date        Int      @unique                           // Integer date for simplicity (e.g., YYYYMMDD)
   daySchema   Json                                        // JSON representation of the day's data
   createdAt   DateTime @default(now())                    // Auto-set creation timestamp
   updatedAt   DateTime @updatedAt                         // Auto-set last updated timestamp
@@ -23,5 +23,14 @@ model ChartTypeConfig {
   keyName   String @unique
   lineCount Int    @default(0)
   barCount  Int    @default(0)
+  pieCount  Int    @default(0)
 }
+
+model CumulativeSchema {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID
+  schema    Json     // Holds the cumulative schema with types or metadata
+  createdAt DateTime @default(now()) // When the cumulative schema was first created
+  updatedAt DateTime @updatedAt      // Auto-updated on schema changes
+}
+
 
