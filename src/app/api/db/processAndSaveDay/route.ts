@@ -103,10 +103,6 @@ export async function POST(req: NextRequest) {
       Object.entries(generatedSchema).forEach(([key, value]) => {
         if (!cumulativeUpdates[key]) {
           cumulativeUpdates[key] = {
-            type:
-              typeof value === "object" && value !== null
-                ? "object"
-                : typeof value,
             example: value,
           };
         }
@@ -180,10 +176,6 @@ export async function POST(req: NextRequest) {
         Object.entries(generatedSchema).forEach(([key, value]) => {
           if (!cumulativeUpdates[key]) {
             cumulativeUpdates[key] = {
-              type:
-                typeof value === "object" && value !== null
-                  ? "object"
-                  : typeof value,
               example: value,
             };
           }
@@ -199,10 +191,6 @@ export async function POST(req: NextRequest) {
 
         Object.entries(generatedSchema).forEach(([key, value]) => {
           cumulativeUpdates[key] = {
-            type:
-              typeof value === "object" && value !== null
-                ? "object"
-                : typeof value,
             example: value,
           };
         });
