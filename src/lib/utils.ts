@@ -6,6 +6,9 @@ import { twMerge } from "tailwind-merge";
 export function cx(...args: ClassValue[]) {
   return twMerge(clsx(...args));
 }
+export function cn(...args: ClassValue[]) {
+  return twMerge(clsx(...args));
+}
 
 // Tremor Raw focusInput [v0.0.1]
 

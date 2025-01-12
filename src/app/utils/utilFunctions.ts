@@ -54,12 +54,13 @@ export const getGenerateDaySchemaPrompt = (
       - Organize them into a clear and consistent JSON structure.
       - Use appropriate data types (e.g., integers for times and numerical values).
       - Ensure the JSON is properly formatted and valid.
-      - The unit of measurement should always match the user's description (e.g., hours remain hours).
+      - The unit of measurement should always match the user's description (e.g., hours remain hours). No need to include this as a key though.
       - For each property, output an object that matches the structure found in the "example" without including the "example" key.`
       }
   
       **IMPORTANT RULES**
       1. The "value" key is critical; always store the main unit under "value".
+      2. Always include an description key that describes the key
     `;
 };
 
