@@ -166,8 +166,8 @@ const DraggablePopOut: React.FC<DraggablePopOutProps> = ({
         height: isMinimized ? 50 : 400,
       }}
       default={{
-        x: 100,
-        y: 100,
+        x: 1200,
+        y: 200,
         width: 400, // Add width
         height: 300, // Add height
       }}

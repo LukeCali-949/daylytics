@@ -2,6 +2,7 @@
 "use client";
 
 import { BarChart } from "../extra/tremor/BarChartStuff";
+import { Card, Switch, Title, Subtitle } from "@tremor/react";
 
 // Adjust the import path as necessary to point to your BarChart component
 
@@ -12,10 +13,13 @@ interface DynamicBarChartProps {
 
 const DynamicBarChart = ({ keyName, chartData }: DynamicBarChartProps) => {
   return (
-    <div className="mb-6 w-[400px] rounded-lg p-3 shadow-2xl">
-      <h4 className="mb-2 text-center font-semibold">
+    <Card className="mb-6 w-[400px] rounded-lg border-2 border-gray-500 p-5 shadow-2xl">
+      <Title className="ml-5 text-xl font-semibold">
         {formatKeyName(keyName)}
-      </h4>
+      </Title>
+      {/* <h4 className="mb-2 text-center font-semibold">
+        {formatKeyName(keyName)}
+      </h4> */}
       <BarChart
         className="h-80"
         data={chartData.map((item) => ({ ...item, [keyName]: item.value }))}
@@ -23,10 +27,10 @@ const DynamicBarChart = ({ keyName, chartData }: DynamicBarChartProps) => {
         categories={[keyName]}
         valueFormatter={(number: number) => `${number}`}
         onValueChange={(v) => console.log(v)}
-        xAxisLabel="Day"
-        yAxisLabel={formatKeyName(keyName)}
+        // xAxisLabel="Day"
+        yAxisLabel={"REPLACE THIS WITH UNITS"}
       />
-    </div>
+    </Card>
   );
 };
 

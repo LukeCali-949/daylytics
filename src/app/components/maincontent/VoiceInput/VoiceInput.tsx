@@ -212,7 +212,7 @@ export default function VoiceInput() {
   };
 
   return (
-    <div className="relative min-h-screen bg-gray-100 p-4 dark:bg-gray-900">
+    <div className="j container mx-auto flex min-h-screen bg-background px-4 py-4 text-foreground">
       {/* Draggable Pop-Out for User Input */}
       <DraggablePopOut
         transcribedText={transcribedText}
@@ -224,8 +224,8 @@ export default function VoiceInput() {
 
       {/* Main Content */}
       <div className="mt-12">
-        <h3 className="mb-8 text-center text-lg font-semibold text-gray-800 dark:text-gray-200">
-          Last 7 Days' Trends
+        <h3 className="mb-8 text-3xl font-bold text-gray-800 dark:text-gray-200">
+          Your Productivity Dashboard
         </h3>
         {isFetchingDays ? (
           <div className="flex items-center justify-center">
