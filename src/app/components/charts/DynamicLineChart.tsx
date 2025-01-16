@@ -1,6 +1,7 @@
 // components/charts/DynamicLineChart.tsx
 "use client";
 
+import { Card, Title } from "@tremor/react";
 import { LineChart } from "../extra/tremor/LineChartStuff";
 
 interface DynamicLineChartProps {
@@ -10,10 +11,10 @@ interface DynamicLineChartProps {
 
 const DynamicLineChart = ({ keyName, chartData }: DynamicLineChartProps) => {
   return (
-    <div className="mb-6 w-[400px] rounded-lg p-3 shadow-2xl">
-      <h4 className="mb-2 text-center font-semibold">
+    <Card className="mb-6 w-[400px] rounded-lg border-2 border-gray-500 bg-[#131313] p-5 shadow-2xl">
+      <Title className="ml-5 text-xl font-semibold">
         {formatKeyName(keyName)}
-      </h4>
+      </Title>
       <LineChart
         className="h-80"
         data={chartData}
@@ -23,7 +24,7 @@ const DynamicLineChart = ({ keyName, chartData }: DynamicLineChartProps) => {
         xAxisLabel="Day"
         yAxisLabel={formatKeyName(keyName)}
       />
-    </div>
+    </Card>
   );
 };
 

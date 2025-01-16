@@ -177,7 +177,7 @@ const DraggablePopOut: React.FC<DraggablePopOutProps> = ({
       dragHandleClassName="drag-handle"
       enableResizing={!isMinimized}
       //disableDragging={isMinimized}
-      className="z-50 overflow-hidden rounded-lg bg-white shadow-lg dark:bg-gray-800"
+      className="absolute z-50 overflow-hidden rounded-lg bg-white shadow-lg dark:bg-gray-800"
     >
       <div className="flex h-full flex-col">
         {/* Header */}

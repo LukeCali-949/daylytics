@@ -7,6 +7,7 @@ import DraggablePopOut from "../DraggablePopOut/DraggablePopOut";
 import { chartComponents } from "../../charts/chartRegistry";
 import { toast } from "sonner";
 import { Toaster } from "~/components/ui/sonner";
+import { motion } from "framer-motion";
 
 export default function VoiceInput() {
   const [transcribedText, setTranscribedText] = useState("");
@@ -14,6 +15,14 @@ export default function VoiceInput() {
   const [allDays, setAllDays] = useState<any[]>([]); // Holds all previous day schemas
   const [chartTypeConfigs, setChartTypeConfigs] = useState<any>({}); // Holds chart type counts
   const [isFetchingDays, setIsFetchingDays] = useState(false); // Loading state for fetching days
+  const [count, setCount] = useState(0); // Loading state for fetching days
+
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsVisible(true), 300);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Fetch the last 7 days' schemas and chart type configs when the component mounts
   useEffect(() => {
@@ -73,7 +82,7 @@ export default function VoiceInput() {
     };
 
     fetchData();
-  }, []);
+  }, [count]);
 
   const submitCurrentDaySchema = async () => {
     if (!transcribedText) {
@@ -83,7 +92,7 @@ export default function VoiceInput() {
     }
 
     const today = new Date();
-    const dateInt = 5;
+    const dateInt = 4;
 
     try {
       const response = await fetch("/api/db/processAndSaveDay", {
@@ -140,6 +149,7 @@ export default function VoiceInput() {
         } else {
           // Existing day updated
           toast.success("Day schema updated successfully!");
+          setCount((count) => count++);
           setAllDays((prevDays) =>
             prevDays.map((day) =>
               day.date === data.day.date ? data.day : day,
@@ -212,7 +222,7 @@ export default function VoiceInput() {
   };
 
   return (
-    <div className="j container mx-auto flex min-h-screen bg-background px-4 py-4 text-foreground">
+    <div className="container mx-auto flex min-h-screen px-4 py-4 text-foreground">
       {/* Draggable Pop-Out for User Input */}
       <DraggablePopOut
         transcribedText={transcribedText}
@@ -235,8 +245,8 @@ export default function VoiceInput() {
             </span>
           </div>
         ) : keysToVisualize.length > 0 ? (
-          <div className="grid grid-cols-1 justify-items-center gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {keysToVisualize.map((key) => {
+          <div className="grid grid-cols-1 gap-[80px] sm:grid-cols-2 lg:grid-cols-3">
+            {keysToVisualize.map((key, index) => {
               const chartType = getChartType(key) || "Line"; // default if undefined
               const ChartComponent =
                 chartComponents[chartType] || chartComponents["Line"]; // Fallback to Line chart
@@ -249,9 +259,18 @@ export default function VoiceInput() {
               }
               const chartData = prepareChartData(key);
               return (
-                <div key={key} className="h-[400px] w-[400px]">
+                <motion.div
+                  key={key}
+                  className="h-[400px] w-[400px]"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{
+                    opacity: isVisible ? 1 : 0,
+                    y: isVisible ? 0 : 20,
+                  }}
+                  transition={{ duration: 0.5, delay: 0.1 * index }}
+                >
                   <ChartComponent keyName={key} chartData={chartData} />
-                </div>
+                </motion.div>
               );
             })}
           </div>

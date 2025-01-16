@@ -5,6 +5,7 @@ import VoiceInput from "./components/maincontent/VoiceInput/VoiceInput";
 import { Button } from "~/components/ui/button";
 import { MoonIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Vortex } from "~/components/ui/ace/vortex";
 
 const client = new AssemblyAI({
   apiKey: process.env.ASSEMBLYAI_API_KEY as string,
@@ -34,7 +35,15 @@ export default function HomePage() {
           </div>
         </div>
       </header>
-      <VoiceInput />
+      <Vortex
+        rangeY={800}
+        rangeSpeed={1}
+        particleCount={500}
+        baseHue={120}
+        className="h-full w-full overflow-hidden"
+      >
+        <VoiceInput />
+      </Vortex>
     </div>
   );
 }
