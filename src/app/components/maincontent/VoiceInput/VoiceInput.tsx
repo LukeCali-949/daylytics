@@ -12,24 +12,29 @@ import { motion } from "framer-motion";
 export default function VoiceInput() {
   const [transcribedText, setTranscribedText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [allDays, setAllDays] = useState<any[]>([]); // Holds all previous day schemas
-  const [chartTypeConfigs, setChartTypeConfigs] = useState<any>({}); // Holds chart type counts
-  const [isFetchingDays, setIsFetchingDays] = useState(false); // Loading state for fetching days
-  const [count, setCount] = useState(0); // Loading state for fetching days
-
-  const [isVisible, setIsVisible] = useState(false);
+  const [allDays, setAllDays] = useState<any[]>([]);
+  const [chartTypeConfigs, setChartTypeConfigs] = useState<
+    Record<string, { chartType: "Line" | "Bar" | "Pie" }>
+  >({});
+  const [isFetchingDays, setIsFetchingDays] = useState(false);
+  const [refreshFlag, setRefreshFlag] = useState(0); // Use to refetch data if needed
+  const [isVisible, setIsVisible] = useState(false); // For chart animations
 
   useEffect(() => {
+    // Slight delay before showing content for a smoother animation
     const timer = setTimeout(() => setIsVisible(true), 300);
     return () => clearTimeout(timer);
   }, []);
 
-  // Fetch the last 7 days' schemas and chart type configs when the component mounts
+  /**
+   * Fetches the last 7 days' schemas and the chart type configs from the database
+   * This effect re-runs whenever refreshFlag changes (to re-fetch updated data).
+   */
   useEffect(() => {
     const fetchData = async () => {
       setIsFetchingDays(true);
       try {
-        // Fetch last 7 days
+        // 1. Fetch last 7 days
         const daysResponse = await fetch("/api/db/getLast7Days", {
           method: "GET",
         });
@@ -41,25 +46,21 @@ export default function VoiceInput() {
           toast.error("Error fetching last 7 days' schemas: " + daysData.error);
         }
 
-        // Fetch chart type configs
+        // 2. Fetch chart type configs
         const chartConfigResponse = await fetch("/api/db/getChartTypeConfigs", {
           method: "GET",
         });
         const chartConfigData = await chartConfigResponse.json();
         if (chartConfigResponse.ok) {
-          // Convert array to key-value map for easy access
-          const configMap: {
-            [key: string]: {
-              lineCount: number;
-              barCount: number;
-              pieCount?: number;
-            };
-          } = {};
+          // Convert the array of configs into a key -> { chartType } mapping
+          const configMap: Record<
+            string,
+            { chartType: "Line" | "Bar" | "Pie" }
+          > = {};
           chartConfigData.chartTypeConfigs.forEach((config: any) => {
+            // Example config record: { keyName: "money_spent", chartType: "Bar" }
             configMap[config.keyName] = {
-              lineCount: config.lineCount,
-              barCount: config.barCount,
-              pieCount: config.pieCount || 0, // Initialize pieCount if not present
+              chartType: config.chartType,
             };
           });
           setChartTypeConfigs(configMap);
@@ -82,8 +83,11 @@ export default function VoiceInput() {
     };
 
     fetchData();
-  }, [count]);
+  }, [refreshFlag]);
 
+  /**
+   * Submits the current day schema to the server
+   */
   const submitCurrentDaySchema = async () => {
     if (!transcribedText) {
       console.error("No transcribed text available.");
@@ -91,10 +95,15 @@ export default function VoiceInput() {
       return;
     }
 
+    // For demonstration purposes, using a static date or a calculated date
     const today = new Date();
-    const dateInt = 4;
+    const dateInt =
+      today.getFullYear() * 10000 +
+      (today.getMonth() + 1) * 100 +
+      today.getDate();
 
     try {
+      setIsLoading(true);
       const response = await fetch("/api/db/processAndSaveDay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,48 +117,34 @@ export default function VoiceInput() {
       if (response.ok) {
         console.log("Day schema processed successfully:", data.day);
 
-        // Check if chartConfig exists in the response to distinguish creation vs. update
+        // If chartConfig exists, this means a new day was created
+        // with newly generated chart types.
         if (data.chartConfig) {
-          // New day created
           toast.success("Day schema generated and saved successfully!");
           setAllDays((prevDays) => [...prevDays, data.day]);
 
-          const newChartConfig = data.chartConfig;
-          if (newChartConfig && typeof newChartConfig === "object") {
-            const updatedConfig = { ...chartTypeConfigs };
-            const configEntries = Object.entries(
-              newChartConfig as Record<string, string>,
-            );
-            configEntries.forEach(([key, chartType]) => {
-              if (
-                chartType === "Line" ||
-                chartType === "Bar" ||
-                chartType === "Pie"
-              ) {
-                if (updatedConfig[key]) {
-                  if (chartType === "Line") {
-                    updatedConfig[key].lineCount += 1;
-                  } else if (chartType === "Bar") {
-                    updatedConfig[key].barCount += 1;
-                  } else if (chartType === "Pie") {
-                    updatedConfig[key].pieCount =
-                      (updatedConfig[key].pieCount || 0) + 1;
-                  }
-                } else {
-                  updatedConfig[key] = {
-                    lineCount: chartType === "Line" ? 1 : 0,
-                    barCount: chartType === "Bar" ? 1 : 0,
-                    pieCount: chartType === "Pie" ? 1 : 0,
-                  };
-                }
+          // Merge the newly assigned chart types into chartTypeConfigs
+          if (typeof data.chartConfig === "object") {
+            const newChartConfig = data.chartConfig as Record<string, string>;
+            const updatedConfigs = { ...chartTypeConfigs };
+            for (const [key, cType] of Object.entries(newChartConfig)) {
+              // cType could be "Line", "Bar", or "Pie"
+              // Only set if not already present (or you can overwrite if desired)
+              if (!updatedConfigs[key]) {
+                updatedConfigs[key] = {
+                  chartType: cType as "Line" | "Bar" | "Pie",
+                };
               }
-            });
-            setChartTypeConfigs(updatedConfig);
+            }
+            setChartTypeConfigs(updatedConfigs);
           }
         } else {
-          // Existing day updated
+          // If no chartConfig in the response, that means
+          // an existing day was updated
           toast.success("Day schema updated successfully!");
-          setCount((count) => count++);
+          // Trigger re-fetch if needed
+          setRefreshFlag((f) => f + 1);
+
           setAllDays((prevDays) =>
             prevDays.map((day) =>
               day.date === data.day.date ? data.day : day,
@@ -167,10 +162,15 @@ export default function VoiceInput() {
       toast.error(
         "An error occurred while processing and saving the day schema.",
       );
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Process the last 7 days to determine which keys to visualize
+  /**
+   * Utility function to identify which keys to visualize,
+   * e.g., those that appear at least 4 times out of the last 7 days
+   */
   const getKeysToVisualize = () => {
     const keyCount: { [key: string]: number } = {};
 
@@ -181,15 +181,13 @@ export default function VoiceInput() {
       });
     });
 
-    // Select keys that appear in at least 4 out of 7 days
-    const selectedKeys = Object.keys(keyCount).filter(
-      (key) => keyCount[key]! >= 4,
-    );
-
-    return selectedKeys;
+    // Example logic: show if key appears in at least 4 out of 7 days
+    return Object.keys(keyCount).filter((key) => keyCount[key]! >= 4);
   };
 
-  // Prepare chart data for each selected key
+  /**
+   * Prepare data for the chosen chart. Usually each day is one data point.
+   */
   const prepareChartData = (key: string) => {
     return allDays.map((day) => ({
       date: `Day ${day.date}`,
@@ -200,29 +198,20 @@ export default function VoiceInput() {
     }));
   };
 
-  // Get the keys that qualify for visualization
-  const keysToVisualize = getKeysToVisualize();
-
-  // Function to determine chart type based on ChartTypeConfig
-  const getChartType = (key: string): "Line" | "Bar" | "Pie" | null => {
+  /**
+   * Retrieve the single chart type for a given key.
+   * If none found, default to "Line".
+   */
+  const getChartTypeForKey = (key: string): "Line" | "Bar" | "Pie" => {
     const config = chartTypeConfigs[key];
-    if (config) {
-      // Enhanced heuristic: Prefer Pie if pieCount is higher, then Line, then Bar
-      if (config.pieCount && config.pieCount > 0) {
-        return "Pie";
-      } else if (config.lineCount > config.barCount) {
-        return "Line";
-      } else if (config.barCount > config.lineCount) {
-        return "Bar";
-      } else {
-        return "Line"; // Default to Line if counts are equal or undefined
-      }
-    }
-    return null; // Undefined if no config found
+    return config?.chartType || "Line";
   };
 
+  // Final list of keys we want to visualize
+  const keysToVisualize = getKeysToVisualize();
+
   return (
-    <div className="container mx-auto flex min-h-screen px-4 py-4 text-foreground">
+    <div className="container relative mx-auto flex min-h-screen px-4 py-4 text-foreground">
       {/* Draggable Pop-Out for User Input */}
       <DraggablePopOut
         transcribedText={transcribedText}
@@ -230,6 +219,8 @@ export default function VoiceInput() {
         isLoading={isLoading}
         submitCurrentDaySchema={submitCurrentDaySchema}
       />
+
+      {/* Toast Notifications */}
       <Toaster richColors />
 
       {/* Main Content */}
@@ -247,26 +238,22 @@ export default function VoiceInput() {
         ) : keysToVisualize.length > 0 ? (
           <div className="grid grid-cols-1 gap-[80px] sm:grid-cols-2 lg:grid-cols-3">
             {keysToVisualize.map((key, index) => {
-              const chartType = getChartType(key) || "Line"; // default if undefined
-              const ChartComponent =
-                chartComponents[chartType] || chartComponents["Line"]; // Fallback to Line chart
-
+              const chartType = getChartTypeForKey(key);
+              const ChartComponent = chartComponents[chartType];
               if (!ChartComponent) {
                 console.error(
                   `No chart component found for chart type: ${chartType}`,
                 );
-                return null; // Skip rendering if no valid chart component exists
+                return null;
               }
+
               const chartData = prepareChartData(key);
               return (
                 <motion.div
                   key={key}
                   className="h-[400px] w-[400px]"
                   initial={{ opacity: 0, y: 20 }}
-                  animate={{
-                    opacity: isVisible ? 1 : 0,
-                    y: isVisible ? 0 : 20,
-                  }}
+                  animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, delay: 0.1 * index }}
                 >
                   <ChartComponent keyName={key} chartData={chartData} />

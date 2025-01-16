@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import {
   getChartConfigPrompt,
   getGenerateDaySchemaPrompt,
-} from "~/app/utils/utilFunctions"; // Assuming this function is updated to use cumulative schema if needed
+} from "~/app/utils/utilFunctions"; // Ensure these functions are updated if needed
 import { db } from "~/server/db"; // Adjust the import path if necessary
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
@@ -36,10 +36,7 @@ export async function POST(req: NextRequest) {
 
     // Retrieve or initialize the cumulative schema
     let cumulativeSchemaObj = await db.cumulativeSchema.findFirst();
-    let cumulativeSchema = cumulativeSchemaObj?.schema;
-    if (!cumulativeSchema) {
-      cumulativeSchema = null;
-    }
+    let cumulativeSchema = cumulativeSchemaObj?.schema ?? null;
 
     // Check if a Day document exists for the given date
     const existingDay = await db.day.findUnique({ where: { date } });
@@ -49,8 +46,6 @@ export async function POST(req: NextRequest) {
       userDescription,
       cumulativeSchema,
     );
-
-    console.log(prompt);
 
     // Call OpenAI API to generate daySchema
     const daySchemaCompletion = await openai.chat.completions.create({
@@ -121,6 +116,7 @@ export async function POST(req: NextRequest) {
         { status: 200 },
       );
     } else {
+      // For creating a new day
       // Extract keys from generated daySchema for chart configuration
       const keys = Object.keys(generatedSchema);
 
@@ -139,7 +135,6 @@ export async function POST(req: NextRequest) {
         response_format: { type: "json_object" },
       });
 
-      // under this
       const chartConfigResponse =
         chartConfigCompletion.choices[0]?.message?.content;
       if (!chartConfigResponse) {
@@ -164,9 +159,9 @@ export async function POST(req: NextRequest) {
           daySchema: generatedSchema,
         },
       });
+
       // Update cumulative schema with new keys
       let cumulativeUpdates: any;
-
       if (cumulativeSchemaObj) {
         // Update existing cumulative schema
         cumulativeUpdates = {
@@ -211,26 +206,15 @@ export async function POST(req: NextRequest) {
             const existingConfig = await db.chartTypeConfig.findUnique({
               where: { keyName: key },
             });
-            const field = chartType.toLowerCase() + "Count";
-            if (existingConfig) {
-              const updatedData = {
-                [field]: (existingConfig as any)[field] + 1,
-              };
-              return db.chartTypeConfig.update({
-                where: { keyName: key },
-                data: updatedData,
-              });
-            } else {
+            if (!existingConfig) {
               return db.chartTypeConfig.create({
                 data: {
                   keyName: key,
-                  lineCount: chartType === "Line" ? 1 : 0,
-                  barCount: chartType === "Bar" ? 1 : 0,
-                  pieCount: chartType === "Pie" ? 1 : 0,
-                  // For future types, ensure your model and logic accommodate them.
+                  chartType: chartType,
                 },
               });
             }
+            // If exists, do nothing.
           }
         },
       );

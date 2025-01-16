@@ -21,9 +21,7 @@ model Day {
 model ChartTypeConfig {
   id        String @id @default(auto()) @map("_id") @db.ObjectId
   keyName   String @unique
-  lineCount Int    @default(0)
-  barCount  Int    @default(0)
-  pieCount  Int    @default(0)
+  chartType String
 }
 
 model CumulativeSchema {
