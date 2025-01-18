@@ -6,13 +6,14 @@ import OpenAI from "openai";
 import {
   getChartConfigPrompt,
   getGenerateDaySchemaPrompt,
-} from "~/app/utils/utilFunctions"; // Ensure these functions are updated if needed
-import { db } from "~/server/db"; // Adjust the import path if necessary
+} from "~/app/utils/utilFunctions";
+import { db } from "~/server/db"; // Adjust if needed
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
+    // Check API key
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "Missing OpenAI API Key." },
@@ -20,8 +21,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Parse request
     const body = await req.json();
-    const { userDescription, date } = body;
+    const { userDescription, date, userId } = body;
 
     if (!userDescription) {
       return NextResponse.json(
@@ -29,34 +31,67 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-
     if (date === undefined) {
       return NextResponse.json({ error: "Date is required." }, { status: 400 });
     }
 
-    // Retrieve or initialize the cumulative schema
+    // 1. Retrieve or initialize the conversation for this user
+    //    (If you don't have a userId system, you can do a single conversation for all).
+    let conversation = await db.conversation.findFirst({
+      where: { userId }, // or remove this if userId isn't used
+    });
+
+    if (!conversation) {
+      conversation = await db.conversation.create({
+        data: {
+          messages: [],
+        },
+      });
+    }
+
+    // 2. Append the new user message to the conversation messages array
+    //    We'll store them in a standard chat format: { role: 'user'|'assistant'|'system', content: '...' }
+    const updatedMessages = [
+      ...(conversation.messages as Array<{ role: string; content: string }>),
+      { role: "user", content: userDescription },
+    ];
+
+    // Now retrieve or initialize the cumulative schema
     let cumulativeSchemaObj = await db.cumulativeSchema.findFirst();
     let cumulativeSchema = cumulativeSchemaObj?.schema ?? null;
 
     // Check if a Day document exists for the given date
     const existingDay = await db.day.findUnique({ where: { date } });
 
-    // Generate daySchema prompt using cumulative schema
-    const prompt = getGenerateDaySchemaPrompt(
+    // 3. Generate the daySchema prompt using the cumulative schema
+    //    (However, we're now going to pass conversation messages to OpenAI
+    //     which includes both the system message AND user messages array).
+    const userPrompt = getGenerateDaySchemaPrompt(
       userDescription,
       cumulativeSchema,
     );
 
-    // Call OpenAI API to generate daySchema
+    // We'll add a final user message: the actual prompt from your function.
+    // The "conversation" array includes all previous context, so we'll do something like:
+    const daySchemaMessages = [
+      {
+        role: "system",
+        content:
+          "You are an AI assistant that generates JSON schemas based on prior conversation history.",
+      },
+      // Insert all previous conversation messages if relevant
+      ...updatedMessages,
+      // Then the final prompt user message for day schema
+      {
+        role: "user",
+        content: userPrompt,
+      },
+    ];
+
+    // 4. Call OpenAI API with the entire conversation context
     const daySchemaCompletion = await openai.chat.completions.create({
       model: "chatgpt-4o-latest",
-      messages: [
-        {
-          role: "system",
-          content: "You are an AI assistant that generates JSON schemas.",
-        },
-        { role: "user", content: prompt },
-      ],
+      messages: daySchemaMessages as any, // pass the conversation context + final user prompt
       response_format: { type: "json_object" },
     });
 
@@ -68,6 +103,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 5. Add the new AI response to the conversation as an "assistant" message
+    const aiReply = { role: "assistant", content: daySchemaResponse };
+    updatedMessages.push(aiReply);
+
+    // 6. Save the updated conversation to the database
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: { messages: updatedMessages as InputJsonValue },
+    });
+
+    // 7. Parse the AI’s JSON schema response
     let generatedSchema;
     try {
       generatedSchema = JSON.parse(daySchemaResponse);
@@ -79,9 +125,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The rest of the logic remains the same
     // If updating an existing day
     if (existingDay && cumulativeSchemaObj) {
-      // Merge new partial schema with existing schema
       const updatedDaySchema = {
         ...(existingDay.daySchema as Record<string, unknown>),
         ...generatedSchema,
@@ -91,15 +137,12 @@ export async function POST(req: NextRequest) {
         data: { daySchema: updatedDaySchema },
       });
 
-      // Update cumulative schema with any new keys from the partial update
       const cumulativeUpdates = {
         ...(cumulativeSchemaObj.schema as Record<string, unknown>),
       };
       Object.entries(generatedSchema).forEach(([key, value]) => {
         if (!cumulativeUpdates[key]) {
-          cumulativeUpdates[key] = {
-            example: value,
-          };
+          cumulativeUpdates[key] = { example: value };
         }
       });
 
@@ -116,22 +159,24 @@ export async function POST(req: NextRequest) {
         { status: 200 },
       );
     } else {
-      // For creating a new day
-      // Extract keys from generated daySchema for chart configuration
+      // Creating a new day
       const keys = Object.keys(generatedSchema);
-
       const chartConfigPrompt = getChartConfigPrompt(keys, userDescription);
+
+      // We'll again pass conversation messages, but let's keep it simpler:
+      const chartConfigMessages = [
+        {
+          role: "system",
+          content:
+            "You are an AI assistant that recommends chart types for numerical metrics.",
+        },
+        // ...updatedMessages,
+        { role: "user", content: chartConfigPrompt },
+      ];
 
       const chartConfigCompletion = await openai.chat.completions.create({
         model: "chatgpt-4o-latest",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an AI assistant that recommends chart types for numerical metrics.",
-          },
-          { role: "user", content: chartConfigPrompt },
-        ],
+        messages: chartConfigMessages as any,
         response_format: { type: "json_object" },
       });
 
@@ -154,25 +199,17 @@ export async function POST(req: NextRequest) {
 
       // Create a new Day document
       const newDay = await db.day.create({
-        data: {
-          date,
-          daySchema: generatedSchema,
-        },
+        data: { date, daySchema: generatedSchema },
       });
 
-      // Update cumulative schema with new keys
       let cumulativeUpdates: any;
       if (cumulativeSchemaObj) {
-        // Update existing cumulative schema
         cumulativeUpdates = {
           ...(cumulativeSchemaObj.schema as Record<string, unknown>),
         };
-
         Object.entries(generatedSchema).forEach(([key, value]) => {
           if (!cumulativeUpdates[key]) {
-            cumulativeUpdates[key] = {
-              example: value,
-            };
+            cumulativeUpdates[key] = { example: value };
           }
         });
 
@@ -181,13 +218,9 @@ export async function POST(req: NextRequest) {
           data: { schema: cumulativeUpdates as InputJsonValue },
         });
       } else {
-        // Create a new cumulative schema
         cumulativeUpdates = {};
-
         Object.entries(generatedSchema).forEach(([key, value]) => {
-          cumulativeUpdates[key] = {
-            example: value,
-          };
+          cumulativeUpdates[key] = { example: value };
         });
 
         await db.cumulativeSchema.create({
@@ -195,13 +228,14 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Update ChartTypeConfig based on chartConfig
+      // Update ChartTypeConfig
       const chartTypeUpdates = Object.entries(chartConfig).map(
-        async ([key, chartType]) => {
+        async ([key, type]) => {
           if (
-            chartType === "Line" ||
-            chartType === "Bar" ||
-            chartType === "Pie"
+            type === "Line" ||
+            type === "Bar" ||
+            type === "Pie" ||
+            type === "ProgressBar"
           ) {
             const existingConfig = await db.chartTypeConfig.findUnique({
               where: { keyName: key },
@@ -210,11 +244,11 @@ export async function POST(req: NextRequest) {
               return db.chartTypeConfig.create({
                 data: {
                   keyName: key,
-                  chartType: chartType,
+                  chartType: type,
                 },
               });
             }
-            // If exists, do nothing.
+            // else do nothing
           }
         },
       );

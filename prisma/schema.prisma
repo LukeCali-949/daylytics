@@ -31,4 +31,12 @@ model CumulativeSchema {
   updatedAt DateTime @updatedAt      // Auto-updated on schema changes
 }
 
+model Conversation {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String?
+  messages   Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 

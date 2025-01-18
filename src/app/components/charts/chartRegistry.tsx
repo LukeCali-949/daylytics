@@ -2,6 +2,8 @@
 import DynamicLineChart from "./DynamicLineChart";
 import DynamicBarChart from "./DynamicBarChart";
 import DynamicPieChart from "./DynamicPieChart";
+import DynamicProgressBar from "./DynamicProgressBar";
+// ... import other chart components if any
 
 export const chartComponents: Record<
   string,
@@ -10,5 +12,6 @@ export const chartComponents: Record<
   Line: DynamicLineChart,
   Bar: DynamicBarChart,
   Pie: DynamicPieChart,
-  // Future chart types can be added here
+  ProgressBar: DynamicProgressBar,
+  // Add new chart types here
 };

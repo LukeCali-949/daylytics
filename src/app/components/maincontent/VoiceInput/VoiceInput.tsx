@@ -14,7 +14,7 @@ export default function VoiceInput() {
   const [isLoading, setIsLoading] = useState(false);
   const [allDays, setAllDays] = useState<any[]>([]);
   const [chartTypeConfigs, setChartTypeConfigs] = useState<
-    Record<string, { chartType: "Line" | "Bar" | "Pie" }>
+    Record<string, { chartType: "Line" | "Bar" | "Pie" | "ProgressBar" }>
   >({});
   const [isFetchingDays, setIsFetchingDays] = useState(false);
   const [refreshFlag, setRefreshFlag] = useState(0); // Use to refetch data if needed
@@ -55,7 +55,7 @@ export default function VoiceInput() {
           // Convert the array of configs into a key -> { chartType } mapping
           const configMap: Record<
             string,
-            { chartType: "Line" | "Bar" | "Pie" }
+            { chartType: "Line" | "Bar" | "Pie" | "ProgressBar" }
           > = {};
           chartConfigData.chartTypeConfigs.forEach((config: any) => {
             // Example config record: { keyName: "money_spent", chartType: "Bar" }
@@ -97,10 +97,7 @@ export default function VoiceInput() {
 
     // For demonstration purposes, using a static date or a calculated date
     const today = new Date();
-    const dateInt =
-      today.getFullYear() * 10000 +
-      (today.getMonth() + 1) * 100 +
-      today.getDate();
+    const dateInt = 5;
 
     try {
       setIsLoading(true);
@@ -132,7 +129,7 @@ export default function VoiceInput() {
               // Only set if not already present (or you can overwrite if desired)
               if (!updatedConfigs[key]) {
                 updatedConfigs[key] = {
-                  chartType: cType as "Line" | "Bar" | "Pie",
+                  chartType: cType as "Line" | "Bar" | "Pie" | "ProgressBar",
                 };
               }
             }
@@ -182,7 +179,7 @@ export default function VoiceInput() {
     });
 
     // Example logic: show if key appears in at least 4 out of 7 days
-    return Object.keys(keyCount).filter((key) => keyCount[key]! >= 4);
+    return Object.keys(keyCount).filter((key) => keyCount[key]! >= 0);
   };
 
   /**
@@ -195,6 +192,10 @@ export default function VoiceInput() {
         typeof day.daySchema[key]?.value === "number"
           ? day.daySchema[key].value
           : 0,
+      goal:
+        typeof day.daySchema[key]?.goal === "number"
+          ? day.daySchema[key]?.goal
+          : undefined,
     }));
   };
 
@@ -202,7 +203,9 @@ export default function VoiceInput() {
    * Retrieve the single chart type for a given key.
    * If none found, default to "Line".
    */
-  const getChartTypeForKey = (key: string): "Line" | "Bar" | "Pie" => {
+  const getChartTypeForKey = (
+    key: string,
+  ): "Line" | "Bar" | "Pie" | "ProgressBar" => {
     const config = chartTypeConfigs[key];
     return config?.chartType || "Line";
   };
