@@ -9,12 +9,20 @@ import { toast } from "sonner";
 import { Toaster } from "~/components/ui/sonner";
 import { motion } from "framer-motion";
 
+export type chartTypes =
+  | "Line"
+  | "Bar"
+  | "Pie"
+  | "ProgressBar"
+  | "ProgressCircle"
+  | "Tracker";
+
 export default function VoiceInput() {
   const [transcribedText, setTranscribedText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [allDays, setAllDays] = useState<any[]>([]);
   const [chartTypeConfigs, setChartTypeConfigs] = useState<
-    Record<string, { chartType: "Line" | "Bar" | "Pie" | "ProgressBar" }>
+    Record<string, { chartType: chartTypes }>
   >({});
   const [isFetchingDays, setIsFetchingDays] = useState(false);
   const [refreshFlag, setRefreshFlag] = useState(0); // Use to refetch data if needed
@@ -53,10 +61,7 @@ export default function VoiceInput() {
         const chartConfigData = await chartConfigResponse.json();
         if (chartConfigResponse.ok) {
           // Convert the array of configs into a key -> { chartType } mapping
-          const configMap: Record<
-            string,
-            { chartType: "Line" | "Bar" | "Pie" | "ProgressBar" }
-          > = {};
+          const configMap: Record<string, { chartType: chartTypes }> = {};
           chartConfigData.chartTypeConfigs.forEach((config: any) => {
             // Example config record: { keyName: "money_spent", chartType: "Bar" }
             configMap[config.keyName] = {
@@ -97,7 +102,7 @@ export default function VoiceInput() {
 
     // For demonstration purposes, using a static date or a calculated date
     const today = new Date();
-    const dateInt = 5;
+    const dateInt = 2;
 
     try {
       setIsLoading(true);
@@ -129,7 +134,7 @@ export default function VoiceInput() {
               // Only set if not already present (or you can overwrite if desired)
               if (!updatedConfigs[key]) {
                 updatedConfigs[key] = {
-                  chartType: cType as "Line" | "Bar" | "Pie" | "ProgressBar",
+                  chartType: cType as chartTypes,
                 };
               }
             }
@@ -203,9 +208,7 @@ export default function VoiceInput() {
    * Retrieve the single chart type for a given key.
    * If none found, default to "Line".
    */
-  const getChartTypeForKey = (
-    key: string,
-  ): "Line" | "Bar" | "Pie" | "ProgressBar" => {
+  const getChartTypeForKey = (key: string): chartTypes => {
     const config = chartTypeConfigs[key];
     return config?.chartType || "Line";
   };

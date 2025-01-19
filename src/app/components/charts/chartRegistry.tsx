@@ -3,6 +3,8 @@ import DynamicLineChart from "./DynamicLineChart";
 import DynamicBarChart from "./DynamicBarChart";
 import DynamicPieChart from "./DynamicPieChart";
 import DynamicProgressBar from "./DynamicProgressBar";
+import DynamicProgressCircle from "./DynamicProgressCircle";
+import DynamicTrackerChart from "./DynamicTrackerChart";
 // ... import other chart components if any
 
 export const chartComponents: Record<
@@ -13,5 +15,6 @@ export const chartComponents: Record<
   Bar: DynamicBarChart,
   Pie: DynamicPieChart,
   ProgressBar: DynamicProgressBar,
-  // Add new chart types here
+  ProgressCircle: DynamicProgressCircle,
+  Tracker: DynamicTrackerChart,
 };

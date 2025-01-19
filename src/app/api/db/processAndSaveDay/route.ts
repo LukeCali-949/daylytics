@@ -164,6 +164,7 @@ export async function POST(req: NextRequest) {
       const chartConfigPrompt = getChartConfigPrompt(keys, userDescription);
 
       // We'll again pass conversation messages, but let's keep it simpler:
+      console.log("Here");
       const chartConfigMessages = [
         {
           role: "system",
@@ -235,7 +236,9 @@ export async function POST(req: NextRequest) {
             type === "Line" ||
             type === "Bar" ||
             type === "Pie" ||
-            type === "ProgressBar"
+            type === "ProgressBar" ||
+            type === "ProgressCircle" ||
+            type === "Tracker"
           ) {
             const existingConfig = await db.chartTypeConfig.findUnique({
               where: { keyName: key },

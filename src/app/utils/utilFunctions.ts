@@ -17,6 +17,9 @@ export const getGenerateDaySchemaPrompt = (
        {
          "programming_hours": { "value": 5, "goal": 40 }
        }
+    7. For events that represent a yes/no situation (e.g., "I went on a run" or "I ate breakfast"), assign a binary value:
+       - Use 1 to indicate the event occurred.
+       - Use 0 to indicate the event did not occur or was not mentioned.
 
     ${
       existingSchema &&
@@ -34,7 +37,7 @@ export const getGenerateDaySchemaPrompt = (
     "${userDescription}"
   
     **Example:**
-    _User Description_: "I woke up at 7 AM, worked for 8 hours, spent $15 on lunch, and went jogging for 30 minutes. I want to achieve 40 hours of programming this week."
+    _User Description_: "I woke up at 7 AM, worked for 8 hours, spent $15 on lunch, went jogging for 30 minutes, and I want to achieve 40 hours of programming this week."
   
     _Generated JSON Schema_:
     {
@@ -53,6 +56,7 @@ export const getGenerateDaySchemaPrompt = (
     - Add new keys as needed without altering the existing ones.
     - For each property, generate an object in the same format as its "example" value, ignoring the "example" key itself.
     - If a goal is mentioned for a metric, include it as a "goal" field alongside "value".
+    - For yes/no events, assign a value of 1 if the event occurred, or 0 if not mentioned.
     - Ensure the JSON is properly formatted and valid.`
         : `**Instructions:**
     - Extract all relevant data points from the description.
@@ -62,6 +66,7 @@ export const getGenerateDaySchemaPrompt = (
     - The unit of measurement should always match the user's description (e.g., hours remain hours). Include units as needed.
     - For each property, output an object that matches the structure found in the "example" without including the "example" key.
     - If a goal is mentioned in the description, include a "goal" property for the relevant metric.
+    - For yes/no events, assign a value of 1 if the event occurred, or 0 otherwise.
     - Optionally include a "description" key for context if the user provides specific details beyond numbers.`
     }
   
@@ -75,18 +80,19 @@ export const getChartConfigPrompt = (
   userDescription: string,
 ) => {
   return `
-    You are an AI assistant that recommends chart types ("Line", "Bar", "Pie", or "ProgressBar") for numerical metrics based on their key names and context.
+    You are an AI assistant that recommends chart types ("Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker") for numerical metrics based on their key names and context.
     Given the following keys: ${JSON.stringify(keys)}
     And considering the user's description: "${userDescription}"
     Output a JSON object mapping each key to its recommended chart type.
 
     **RULES**:
-    1. If the user implies or states a target, objective, or any numeric threshold they want to achieve (even if they don't use the word "goal"), you should return "ProgressBar" for that key.
-    2. Return "Pie" only if the user explicitly requests it in their description.
-    3. Otherwise, default to "Line" or "Bar" based on context (e.g., time series might be "Line", discrete comparisons might be "Bar").
+    1. If the data for a key is binary (only 0s and 1s across days), recommend "Tracker" for that key.
+    2. If the user implies or states a target, objective, or any numeric threshold they want to achieve (even if they don't use the word "goal"), you should return "ProgressBar" for that key (Unless the user specifies they want a ProgressCircle instead).
+    3. Return "Pie" only if the user explicitly requests it in their description.
+    4. Otherwise, default to "Line" or "Bar" based on context (e.g., time series might be "Line", discrete comparisons might be "Bar").
 
     **IMPORTANT**:
-    - You should only return strings: "Line", "Bar", "Pie", or "ProgressBar".
+    - You should only return strings: "Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker".
     - The output must be a valid JSON object where each key maps to one of the above strings.
   `;
 };
