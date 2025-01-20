@@ -4,10 +4,24 @@ import { InputJsonValue } from "@prisma/client/runtime/library";
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import {
+  classifyIntent,
+  getChartChangeExtractionPrompt,
   getChartConfigPrompt,
   getGenerateDaySchemaPrompt,
 } from "~/app/utils/utilFunctions";
 import { db } from "~/server/db"; // Adjust if needed
+
+interface ChartChangeRequest {
+  key: string;
+  chartType:
+    | "Line"
+    | "Bar"
+    | "Pie"
+    | "ProgressBar"
+    | "ProgressCircle"
+    | "Tracker";
+  confidence: number;
+}
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
@@ -37,8 +51,9 @@ export async function POST(req: NextRequest) {
 
     // 1. Retrieve or initialize the conversation for this user
     //    (If you don't have a userId system, you can do a single conversation for all).
+
     let conversation = await db.conversation.findFirst({
-      where: { userId }, // or remove this if userId isn't used
+      // or remove this if userId isn't used
     });
 
     if (!conversation) {
@@ -47,6 +62,120 @@ export async function POST(req: NextRequest) {
           messages: [],
         },
       });
+    }
+
+    const updatedMessagesForIntentClassification = [
+      ...(conversation.messages as Array<{ role: string; content: string }>),
+    ];
+
+    // 1. Check if user wants to change chart type or do normal data entry
+    const intent = await classifyIntent(
+      userDescription,
+      updatedMessagesForIntentClassification,
+    );
+
+    if (intent === "chart_change_request") {
+      // 2. Extract the key & chartType
+      const chartChangePrompt = getChartChangeExtractionPrompt(userDescription);
+
+      const updatedMessages = [
+        ...(conversation.messages as Array<{ role: string; content: string }>),
+        { role: "user", content: userDescription },
+        { role: "system", content: chartChangePrompt },
+      ];
+
+      const chartChangeCompletion = await openai.chat.completions.create({
+        model: "chatgpt-4o-latest",
+        messages: updatedMessages as any, // pass the conversation context + final user prompt
+        response_format: { type: "json_object" },
+      });
+
+      const chartChangeResponse =
+        chartChangeCompletion.choices[0]?.message?.content;
+      if (!chartChangeResponse) {
+        return NextResponse.json(
+          { error: "Failed to generate chart change schema." },
+          { status: 500 },
+        );
+      }
+
+      const aiReply = { role: "assistant", content: chartChangeResponse };
+      updatedMessages.push(aiReply);
+
+      // 6. Save the updated conversation to the database
+      await db.conversation.update({
+        where: { id: conversation.id },
+        data: { messages: updatedMessages as InputJsonValue },
+      });
+
+      let generatedChartChangeSchema;
+      try {
+        generatedChartChangeSchema = JSON.parse(chartChangeResponse);
+      } catch (parseError) {
+        console.error("Error parsing day schema:", parseError);
+        return NextResponse.json(
+          { error: "Invalid JSON format for day schema." },
+          { status: 500 },
+        );
+      }
+
+      const { key, chartType } = generatedChartChangeSchema;
+
+      if (!key || !chartType) {
+        return NextResponse.json(
+          {
+            error: "Failed to extract chart key or chart type from user input.",
+          },
+          { status: 400 },
+        );
+      }
+
+      // Validate chartType is one of the recognized ones
+      const validChartTypes = [
+        "Line",
+        "Bar",
+        "Pie",
+        "ProgressBar",
+        "ProgressCircle",
+        "Tracker",
+      ];
+      if (!validChartTypes.includes(chartType)) {
+        return NextResponse.json(
+          {
+            error: `Invalid chart type: ${chartType}. Must be one of ${validChartTypes.join(", ")}.`,
+          },
+          { status: 400 },
+        );
+      }
+
+      // 3. Update or create ChartTypeConfig
+      let existingConfig = await db.chartTypeConfig.findUnique({
+        where: { keyName: key },
+      });
+
+      if (existingConfig) {
+        // update
+        await db.chartTypeConfig.update({
+          where: { keyName: key },
+          data: { chartType },
+        });
+      } else {
+        // optionally verify key is valid in your cumulative schema or day schema
+        // We'll assume it's valid
+        await db.chartTypeConfig.create({
+          data: {
+            keyName: key,
+            chartType,
+          },
+        });
+      }
+
+      return NextResponse.json(
+        {
+          message: `Chart for '${key}' changed to '${chartType}' successfully.`,
+        },
+        { status: 200 },
+      );
     }
 
     // 2. Append the new user message to the conversation messages array

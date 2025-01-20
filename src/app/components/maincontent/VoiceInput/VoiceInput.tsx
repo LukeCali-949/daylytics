@@ -100,9 +100,9 @@ export default function VoiceInput() {
       return;
     }
 
-    // For demonstration purposes, using a static date or a calculated date
+    // For demonstration, using a static date or a calculated date
     const today = new Date();
-    const dateInt = 2;
+    const dateInt = 3;
 
     try {
       setIsLoading(true);
@@ -116,22 +116,44 @@ export default function VoiceInput() {
       });
 
       const data = await response.json();
-      if (response.ok) {
+
+      if (!response.ok) {
+        // Handle error
+        console.error("Error:", data.error);
+        toast.error("Error: " + data.error);
+        return;
+      }
+
+      // CASE A: The route indicates a chart change request was fulfilled
+      // e.g., { "message": "Chart for 'programming_hours' changed to 'Bar' successfully." }
+      if (data.message && !data.day) {
+        // The route did not return `data.day`, so it's presumably a chart-change request
+        toast.success(data.message);
+        // Optionally refresh the chart config from the server if needed
+        setRefreshFlag((prev) => prev + 1);
+        setTranscribedText("");
+        return; // Stop here
+      }
+
+      // CASE B: The route indicates a new day or updated day schema
+      if (data.day) {
+        // If the route created or updated a day
         console.log("Day schema processed successfully:", data.day);
 
-        // If chartConfig exists, this means a new day was created
-        // with newly generated chart types.
+        // If chartConfig exists, a new day was created with newly generated chart types
         if (data.chartConfig) {
           toast.success("Day schema generated and saved successfully!");
+          // Merge day
           setAllDays((prevDays) => [...prevDays, data.day]);
 
-          // Merge the newly assigned chart types into chartTypeConfigs
+          // Merge newly assigned chart types into chartTypeConfigs
           if (typeof data.chartConfig === "object") {
             const newChartConfig = data.chartConfig as Record<string, string>;
             const updatedConfigs = { ...chartTypeConfigs };
+
             for (const [key, cType] of Object.entries(newChartConfig)) {
-              // cType could be "Line", "Bar", or "Pie"
-              // Only set if not already present (or you can overwrite if desired)
+              // cType could be "Line", "Bar", "Pie", etc.
+              // Only set if not already present
               if (!updatedConfigs[key]) {
                 updatedConfigs[key] = {
                   chartType: cType as chartTypes,
@@ -141,11 +163,10 @@ export default function VoiceInput() {
             setChartTypeConfigs(updatedConfigs);
           }
         } else {
-          // If no chartConfig in the response, that means
-          // an existing day was updated
+          // An existing day was updated
           toast.success("Day schema updated successfully!");
-          // Trigger re-fetch if needed
-          setRefreshFlag((f) => f + 1);
+          // Re-fetch if needed
+          setRefreshFlag((prev) => prev + 1);
 
           setAllDays((prevDays) =>
             prevDays.map((day) =>
@@ -154,11 +175,16 @@ export default function VoiceInput() {
           );
         }
 
-        setTranscribedText(""); // Clear the transcribed text
-      } else {
-        console.error("Error processing and saving day schema:", data.error);
-        toast.error("Error processing and saving day schema: " + data.error);
+        setTranscribedText("");
+        return; // Stop here
       }
+
+      // If we get here, no recognizable data was returned
+      console.warn(
+        "Response returned with neither 'day' nor 'message'. Data:",
+        data,
+      );
+      toast("Request completed but no day or message provided.");
     } catch (error) {
       console.error("Error processing and saving day schema:", error);
       toast.error(

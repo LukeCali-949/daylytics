@@ -36,7 +36,7 @@ const DynamicPieChart = ({ keyName, chartData }: DynamicPieChartProps) => {
         colors={["blue", "violet", "cyan", "emerald"]}
         tooltipCallback={() => null} // Simplified for dynamic rendering
         valueFormatter={(number: number) =>
-          `$${Intl.NumberFormat("us").format(number).toString()}`
+          `${Intl.NumberFormat("us").format(number).toString()}`
         }
       />
     </div>

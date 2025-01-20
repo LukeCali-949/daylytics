@@ -1,4 +1,6 @@
 import { JsonValue } from "@prisma/client/runtime/library";
+import OpenAI from "openai";
+import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 
 export const getGenerateDaySchemaPrompt = (
   userDescription: string,
@@ -96,3 +98,86 @@ export const getChartConfigPrompt = (
     - The output must be a valid JSON object where each key maps to one of the above strings.
   `;
 };
+
+export const getChartChangeExtractionPrompt = (userInput: string) => `
+Extract the metric key and desired chart type from this request. 
+Valid chart types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker.
+
+Respond with JSON: {
+  "key": "snake_case_metric_name",
+  "chartType": "ValidChartType",
+  "confidence": 0-1
+}
+
+Input: "${userInput}"
+`;
+
+type IntentType =
+  | "chart_change_request"
+  | "data_entry"
+  | "future_feature_1"
+  | "future_feature_2";
+
+interface IntentClassification {
+  intent: IntentType;
+  confidence: number;
+}
+
+export async function classifyIntent(
+  userInput: string,
+  conversation: {}[],
+): Promise<IntentType> {
+  const prompt = `
+Analyze this user input to determine their intent. Respond with JSON format:
+{
+  "intent": "chart_change_request" | "data_entry" | "future_feature_1" | "future_feature_2",
+  "confidence": 0.0-1.0
+}
+
+Consider these patterns:
+- Chart change requests: mentions "change", "switch", "make", "show as", "display as" with chart types
+- Data entry: contains numbers, metrics, or descriptions of activities/events
+- Future features: (define patterns when you implement them)
+
+Examples of chart change requests:
+- "Change the programming hours chart to a bar chart"
+- "Make the steps display as a progress circle"
+- "Switch the caffeine consumption to a pie chart"
+
+User input: "${userInput}"
+  `;
+
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+
+    const userPrompt = { role: "user", content: prompt };
+    conversation.push(userPrompt);
+    const response = await openai.chat.completions.create({
+      model: "chatgpt-4o-latest",
+      messages: conversation as any,
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(
+      response.choices[0]?.message?.content || "{}",
+    ) as IntentClassification;
+
+    // Validate and fallback to data_entry if uncertain
+    if (
+      result.confidence >= 0.2 &&
+      [
+        "chart_change_request",
+        "data_entry",
+        "future_feature_1",
+        "future_feature_2",
+      ].includes(result.intent)
+    ) {
+      return result.intent;
+    }
+
+    return "data_entry";
+  } catch (error) {
+    console.error("Intent classification failed:", error);
+    return "data_entry";
+  }
+}
