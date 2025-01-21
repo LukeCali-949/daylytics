@@ -99,11 +99,10 @@ export default function VoiceInput() {
       toast.error("No transcribed text available.");
       return;
     }
-
-    // For demonstration, using a static date or a calculated date
+  
     const today = new Date();
-    const dateInt = 3;
-
+    const dateInt = 3; // Example date
+  
     try {
       setIsLoading(true);
       const response = await fetch("/api/db/processAndSaveDay", {
@@ -114,46 +113,49 @@ export default function VoiceInput() {
           date: dateInt,
         }),
       });
-
+  
       const data = await response.json();
-
+  
       if (!response.ok) {
-        // Handle error
         console.error("Error:", data.error);
         toast.error("Error: " + data.error);
         return;
       }
-
-      // CASE A: The route indicates a chart change request was fulfilled
-      // e.g., { "message": "Chart for 'programming_hours' changed to 'Bar' successfully." }
-      if (data.message && !data.day) {
-        // The route did not return `data.day`, so it's presumably a chart-change request
+  
+      // CASE A: Chart changes (unchanged from before)
+      if (data.message && data.changes && Array.isArray(data.changes) && !data.day) {
+        // multiple chart changes
         toast.success(data.message);
-        // Optionally refresh the chart config from the server if needed
-        setRefreshFlag((prev) => prev + 1);
+        setChartTypeConfigs((prevConfigs) => {
+          const newConfigs = { ...prevConfigs };
+          for (const change of data.changes) {
+            const { key, chartType } = change;
+            if (key && chartType) {
+              newConfigs[key] = { chartType };
+            }
+          }
+          return newConfigs;
+        });
         setTranscribedText("");
-        return; // Stop here
+        return;
       }
-
-      // CASE B: The route indicates a new day or updated day schema
+  
+      // CASE B: Normal day schema flow or partial updates
       if (data.day) {
-        // If the route created or updated a day
+        // The route returns `updatedKeys` to show which keys changed, if any.
+        const updatedKeys: string[] = data.updatedKeys || [];
+  
         console.log("Day schema processed successfully:", data.day);
-
-        // If chartConfig exists, a new day was created with newly generated chart types
+  
+        // If there's chartConfig, it means a brand new day or newly generated chart types
         if (data.chartConfig) {
           toast.success("Day schema generated and saved successfully!");
-          // Merge day
           setAllDays((prevDays) => [...prevDays, data.day]);
-
-          // Merge newly assigned chart types into chartTypeConfigs
+  
           if (typeof data.chartConfig === "object") {
             const newChartConfig = data.chartConfig as Record<string, string>;
             const updatedConfigs = { ...chartTypeConfigs };
-
             for (const [key, cType] of Object.entries(newChartConfig)) {
-              // cType could be "Line", "Bar", "Pie", etc.
-              // Only set if not already present
               if (!updatedConfigs[key]) {
                 updatedConfigs[key] = {
                   chartType: cType as chartTypes,
@@ -163,37 +165,45 @@ export default function VoiceInput() {
             setChartTypeConfigs(updatedConfigs);
           }
         } else {
-          // An existing day was updated
+          // Partial update or existing day updated
           toast.success("Day schema updated successfully!");
-          // Re-fetch if needed
-          setRefreshFlag((prev) => prev + 1);
-
+  
+          // No full data refresh. Instead, merge `day` into allDays
           setAllDays((prevDays) =>
-            prevDays.map((day) =>
-              day.date === data.day.date ? data.day : day,
-            ),
+            prevDays.map((oldDay) => {
+              if (oldDay.date === data.day.date) {
+                // Merge new day data if needed
+                // But usually, data.day is the entire updated day doc,
+                // so we can replace the entire object
+                return data.day;
+              }
+              return oldDay;
+            })
           );
+  
+          // If you want to do anything special with updatedKeys, do so here:
+          if (updatedKeys.length > 0) {
+            console.log("Keys that were updated:", updatedKeys);
+            // Possibly show a custom toast or highlight changed charts
+          }
         }
-
+  
         setTranscribedText("");
-        return; // Stop here
+        return;
       }
-
-      // If we get here, no recognizable data was returned
-      console.warn(
-        "Response returned with neither 'day' nor 'message'. Data:",
-        data,
-      );
+  
+      // If we reach here, no recognizable data
+      console.warn("Response returned with neither 'day' nor 'message'. Data:", data);
       toast("Request completed but no day or message provided.");
     } catch (error) {
       console.error("Error processing and saving day schema:", error);
-      toast.error(
-        "An error occurred while processing and saving the day schema.",
-      );
+      toast.error("An error occurred while processing and saving the day schema.");
     } finally {
       setIsLoading(false);
     }
   };
+  
+  
 
   /**
    * Utility function to identify which keys to visualize,

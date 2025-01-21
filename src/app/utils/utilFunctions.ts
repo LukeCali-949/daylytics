@@ -100,13 +100,34 @@ export const getChartConfigPrompt = (
 };
 
 export const getChartChangeExtractionPrompt = (userInput: string) => `
-Extract the metric key and desired chart type from this request. 
+Extract all metric keys and their desired chart types from this request. 
 Valid chart types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker.
 
-Respond with JSON: {
-  "key": "snake_case_metric_name",
-  "chartType": "ValidChartType",
-  "confidence": 0-1
+Respond with JSON array of changes: {
+  "changes": [
+    {
+      "key": "snake_case_metric_name",
+      "chartType": "ValidChartType",
+      "confidence": 0-1
+    },
+    // ... more changes
+  ]
+}
+
+Example input: "Change programming_hours to a bar chart and make steps display as a progress circle"
+Example response: {
+  "changes": [
+    {
+      "key": "programming_hours",
+      "chartType": "Bar",
+      "confidence": 0.9
+    },
+    {
+      "key": "steps",
+      "chartType": "ProgressCircle", 
+      "confidence": 0.9
+    }
+  ]
 }
 
 Input: "${userInput}"
@@ -115,8 +136,6 @@ Input: "${userInput}"
 type IntentType =
   | "chart_change_request"
   | "data_entry"
-  | "future_feature_1"
-  | "future_feature_2";
 
 interface IntentClassification {
   intent: IntentType;
@@ -130,14 +149,15 @@ export async function classifyIntent(
   const prompt = `
 Analyze this user input to determine their intent. Respond with JSON format:
 {
-  "intent": "chart_change_request" | "data_entry" | "future_feature_1" | "future_feature_2",
+  "intent": "chart_change_request" | "data_entry" 
   "confidence": 0.0-1.0
 }
 
 Consider these patterns:
 - Chart change requests: mentions "change", "switch", "make", "show as", "display as" with chart types
 - Data entry: contains numbers, metrics, or descriptions of activities/events
-- Future features: (define patterns when you implement them)
+- Consider the conversation history to determine intent
+
 
 Examples of chart change requests:
 - "Change the programming hours chart to a bar chart"
