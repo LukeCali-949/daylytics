@@ -8,6 +8,9 @@ import { chartComponents } from "../../charts/chartRegistry";
 import { toast } from "sonner";
 import { Toaster } from "~/components/ui/sonner";
 import { motion } from "framer-motion";
+import { format } from "date-fns";
+
+import DynamicActivityTracker from "../../charts/DynamicActivityTracker";
 
 export type chartTypes =
   | "Line"
@@ -100,9 +103,6 @@ export default function VoiceInput() {
       return;
     }
   
-    const today = new Date();
-    const dateInt = 3; // Example date
-  
     try {
       setIsLoading(true);
       const response = await fetch("/api/db/processAndSaveDay", {
@@ -110,7 +110,7 @@ export default function VoiceInput() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userDescription: transcribedText,
-          date: dateInt,
+          date: new Date().toISOString().split('T')[0]
         }),
       });
   
@@ -122,86 +122,78 @@ export default function VoiceInput() {
         return;
       }
   
-      // CASE A: Chart changes (unchanged from before)
-      if (data.message && data.changes && Array.isArray(data.changes) && !data.day) {
-        // multiple chart changes
-        toast.success(data.message);
-        setChartTypeConfigs((prevConfigs) => {
-          const newConfigs = { ...prevConfigs };
-          for (const change of data.changes) {
-            const { key, chartType } = change;
-            if (key && chartType) {
-              newConfigs[key] = { chartType };
+      // Handle chart configuration changes
+      if (data.chartChanges?.length > 0) {
+        setChartTypeConfigs(prev => ({
+          ...prev,
+          ...Object.fromEntries(
+            data.chartChanges.map(({ key, chartType }: { key: string, chartType: chartTypes }) => 
+              [key, { chartType }]
+            )
+          )
+        }));
+        toast.success(`Updated ${data.chartChanges.length} chart type(s)`);
+      }
+  
+      // Handle data updates
+      if (data.updatedDays?.length > 0) {
+        setAllDays(prev => {
+          const newDays = [...prev];
+          
+          data.updatedDays.forEach((updatedDay: any) => {
+            const existingIndex = newDays.findIndex(d => d.date === updatedDay.date);
+            
+            if (existingIndex > -1) {
+              // Merge updates with existing day
+              newDays[existingIndex] = {
+                ...newDays[existingIndex],
+                daySchema: {
+                  ...newDays[existingIndex].daySchema,
+                  ...updatedDay.daySchema
+                }
+              };
+            } else {
+              // Add new day and sort chronologically
+              newDays.push(updatedDay);
+              newDays.sort((a, b) => 
+                new Date(b.date).getTime() - new Date(a.date).getTime()
+              );
             }
-          }
-          return newConfigs;
+          });
+  
+          return newDays;
         });
-        setTranscribedText("");
-        return;
+  
+        const actionMessage = data.updatedDays.length === 1 
+          ? "Day updated successfully!" 
+          : `${data.updatedDays.length} days updated!`;
+        
+        toast.success(actionMessage);
       }
   
-      // CASE B: Normal day schema flow or partial updates
-      if (data.day) {
-        // The route returns `updatedKeys` to show which keys changed, if any.
-        const updatedKeys: string[] = data.updatedKeys || [];
-  
-        console.log("Day schema processed successfully:", data.day);
-  
-        // If there's chartConfig, it means a brand new day or newly generated chart types
-        if (data.chartConfig) {
-          toast.success("Day schema generated and saved successfully!");
-          setAllDays((prevDays) => [...prevDays, data.day]);
-  
-          if (typeof data.chartConfig === "object") {
-            const newChartConfig = data.chartConfig as Record<string, string>;
-            const updatedConfigs = { ...chartTypeConfigs };
-            for (const [key, cType] of Object.entries(newChartConfig)) {
-              if (!updatedConfigs[key]) {
-                updatedConfigs[key] = {
-                  chartType: cType as chartTypes,
-                };
-              }
-            }
-            setChartTypeConfigs(updatedConfigs);
-          }
-        } else {
-          // Partial update or existing day updated
-          toast.success("Day schema updated successfully!");
-  
-          // No full data refresh. Instead, merge `day` into allDays
-          setAllDays((prevDays) =>
-            prevDays.map((oldDay) => {
-              if (oldDay.date === data.day.date) {
-                // Merge new day data if needed
-                // But usually, data.day is the entire updated day doc,
-                // so we can replace the entire object
-                return data.day;
-              }
-              return oldDay;
-            })
-          );
-  
-          // If you want to do anything special with updatedKeys, do so here:
-          if (updatedKeys.length > 0) {
-            console.log("Keys that were updated:", updatedKeys);
-            // Possibly show a custom toast or highlight changed charts
-          }
-        }
-  
-        setTranscribedText("");
-        return;
+      // Handle new chart configurations from automatic recommendations
+      if (data.updatedKeys?.length > 0 && data.chartConfig) {
+        setChartTypeConfigs(prev => ({
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(data.chartConfig).map(([key, cType]) => [
+              key, 
+              { chartType: cType as chartTypes }
+            ])
+          )
+        }));
       }
   
-      // If we reach here, no recognizable data
-      console.warn("Response returned with neither 'day' nor 'message'. Data:", data);
-      toast("Request completed but no day or message provided.");
+      setTranscribedText("");
+  
     } catch (error) {
-      console.error("Error processing and saving day schema:", error);
-      toast.error("An error occurred while processing and saving the day schema.");
+      console.error("Error processing request:", error);
+      toast.error("An error occurred while processing your request");
     } finally {
       setIsLoading(false);
     }
   };
+  
   
   
 
@@ -224,21 +216,55 @@ export default function VoiceInput() {
   };
 
   /**
-   * Prepare data for the chosen chart. Usually each day is one data point.
-   */
-  const prepareChartData = (key: string) => {
-    return allDays.map((day) => ({
-      date: `Day ${day.date}`,
-      value:
-        typeof day.daySchema[key]?.value === "number"
-          ? day.daySchema[key].value
-          : 0,
-      goal:
-        typeof day.daySchema[key]?.goal === "number"
-          ? day.daySchema[key]?.goal
-          : undefined,
-    }));
-  };
+ * Returns an array of 7 data points for the last 7 days from "today" (including today).
+ * Each data point has { date: string, value: number, goal?: number }.
+ * The date label is:
+ *   - "today" for i=0,
+ *   - "yesterday" for i=1,
+ *   - weekday name (e.g., "Saturday") for i >= 2
+ */
+const prepareChartData = (key: string) => {
+  // We'll build an array from 6 days ago up to "today"
+  // so the final array is in chronological order from oldest to newest.
+  const results: Array<{ date: string; value: number; goal?: number }> = [];
+
+  for (let i = 6; i >= 0; i--) {
+    // Create a date for "today - i days"
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+
+    // Format an ISO string "YYYY-MM-DD" for comparing to day.date in allDays
+    const isoStr = d.toISOString().split("T")[0];
+
+    // Label logic: i=0 => "today", i=1 => "yesterday", else => weekday
+    let label: string;
+    if (i === 0) {
+      label = "today";
+    } else if (i === 1) {
+      label = "yesterday";
+    } else {
+      label = format(d, "eeee"); // e.g., "Saturday"
+    }
+
+    // See if we have data in allDays for isoStr
+    const foundDay = allDays.find((day) => day.date === isoStr);
+
+    let val = 0;
+    let g: number | undefined = undefined;
+    if (foundDay?.daySchema?.[key]) {
+      val = foundDay.daySchema[key].value ?? 0;
+      g = foundDay.daySchema[key].goal;
+    }
+
+    results.push({
+      date: label, // or isoStr if you prefer the chart's x-axis to show "today" / "Saturday" / etc.
+      value: val,
+      goal: g,
+    });
+  }
+
+  return results;
+};
 
   /**
    * Retrieve the single chart type for a given key.

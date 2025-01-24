@@ -3,287 +3,196 @@ import { InputJsonValue } from "@prisma/client/runtime/library";
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { db } from "~/server/db";
-
+import { format, parseISO, isValid, isFuture } from "date-fns";
 import {
-  classifyIntent,
-  getChartChangeExtractionPrompt,
   getChartConfigPrompt,
   getGenerateDaySchemaPrompt,
+  parseUserActions,
+  UserActionResponse
 } from "~/app/utils/utilFunctions";
-
-interface ChartChangeRequest {
-  key: string;
-  chartType: "Line" | "Bar" | "Pie" | "ProgressBar" | "ProgressCircle" | "Tracker";
-  confidence: number;
-}
-
-interface ChartChangesResponse {
-  changes: ChartChangeRequest[];
-}
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
+    // Validate API key
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ error: "Missing OpenAI API Key." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing OpenAI API Key." },
+        { status: 400 }
+      );
     }
 
+    // Parse request body
     const body = await req.json();
-    const { userDescription, date, userId } = body;
+    const { userDescription, date } = body;
 
     if (!userDescription) {
-      return NextResponse.json({ error: "User description is required." }, { status: 400 });
-    }
-    if (date === undefined) {
-      return NextResponse.json({ error: "Date is required." }, { status: 400 });
-    }
-
-    // Retrieve or initialize conversation (simplified for this example)
-    let conversation = await db.conversation.findFirst();
-    if (!conversation) {
-      conversation = await db.conversation.create({
-        data: { messages: [] },
-      });
+      return NextResponse.json(
+        { error: "User description is required." },
+        { status: 400 }
+      );
     }
 
-    const updatedMessagesForIntentClassification = [
-      ...(conversation.messages as Array<{ role: string; content: string }>),
-    ];
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return NextResponse.json(
+        { error: "Invalid date format. Use YYYY-MM-DD." },
+        { status: 400 }
+      );
+    }
 
-    // Classify intent
-    const intent = await classifyIntent(userDescription, updatedMessagesForIntentClassification);
+    // Check future dates
+    const currentDate = new Date();
+    const inputDate = parseISO(date);
+    if (isFuture(inputDate)) {
+      return NextResponse.json(
+        { error: "Future dates are not allowed." },
+        { status: 400 }
+      );
+    }
 
-    // Handle chart change requests
-    if (intent === "chart_change_request") {
-      const chartChangePrompt = getChartChangeExtractionPrompt(userDescription);
-      const updatedMessages = [
-        ...(conversation.messages as Array<{ role: string; content: string }>),
-        { role: "user", content: userDescription },
-        { role: "system", content: chartChangePrompt },
-      ];
+    // Retrieve or create conversation
+    let conversation = await db.conversation.findFirst() || 
+      await db.conversation.create({ data: { messages: [] } });
+    const conversationHistory = conversation.messages as Array<{ role: string; content: string }>;
 
-      const chartChangeCompletion = await openai.chat.completions.create({
-        model: "chatgpt-4o-latest",
-        messages: updatedMessages as any,
-        response_format: { type: "json_object" },
-      });
+    // Parse user actions using combined parser
+    const { chartChanges = [], updates = [] } = await parseUserActions(
+      userDescription,
+      conversationHistory
+    );
 
-      const chartChangeResponse = chartChangeCompletion.choices[0]?.message?.content;
-      if (!chartChangeResponse) {
-        return NextResponse.json({ error: "Failed to generate chart change schema." }, { status: 500 });
+    // Process chart configuration changes
+    const validChartTypes = ["Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker"];
+    if (chartChanges.length > 0) {
+      await Promise.all(
+        chartChanges.map(async ({ key, chartType }) => {
+          if (!validChartTypes.includes(chartType)) return;
+          
+          return db.chartTypeConfig.upsert({
+            where: { keyName: key },
+            update: { chartType },
+            create: { keyName: key, chartType }
+          });
+        })
+      );
+    }
+
+    // Process data updates
+    const processedDays = [];
+    const updatedKeys = new Set<string>();
+    let cumulativeSchemaUpdates: Record<string, any> = {};
+
+    if (updates.length > 0) {
+      // Get cumulative schema once
+      const cumulativeSchemaObj = await db.cumulativeSchema.findFirst();
+      cumulativeSchemaUpdates = cumulativeSchemaObj?.schema 
+        ? { ...(cumulativeSchemaObj.schema as Record<string, any>) }
+        : {};
+
+      for (const update of updates) {
+        // Validate and normalize date
+        let targetDate = parseISO(update.date);
+        if (!isValid(targetDate) || isFuture(targetDate)) {
+          targetDate = inputDate; // Fallback to request date
+        }
+        const isoDate = format(targetDate, 'yyyy-MM-dd');
+
+        // Prepare update data
+        const updateData = {
+          [update.key]: update.goal 
+            ? { value: update.value, goal: update.goal }
+            : { value: update.value }
+        };
+
+        // Update/create day document
+        const existingDay = await db.day.findUnique({ where: { date: isoDate } });
+        const updatedDay = existingDay
+          ? await db.day.update({
+              where: { date: isoDate },
+              data: { daySchema: { ...(existingDay.daySchema as Record<string, any>), ...updateData } }
+            })
+          : await db.day.create({
+              data: { date: isoDate, daySchema: updateData }
+            });
+
+        processedDays.push(updatedDay);
+        updatedKeys.add(update.key);
+
+        // Track cumulative schema updates
+        if (!cumulativeSchemaUpdates[update.key]) {
+          cumulativeSchemaUpdates[update.key] = { example: updateData[update.key] };
+        }
       }
 
-      const aiReply = { role: "assistant", content: chartChangeResponse };
-      updatedMessages.push(aiReply);
-
-      await db.conversation.update({
-        where: { id: conversation.id },
-        data: { messages: updatedMessages as InputJsonValue },
+      // Update cumulative schema
+      await db.cumulativeSchema.upsert({
+        where: { id: cumulativeSchemaObj?.id || "" },
+        update: { schema: cumulativeSchemaUpdates },
+        create: { schema: cumulativeSchemaUpdates }
       });
+    }
 
-      let generatedChartChangeSchema: ChartChangesResponse;
+    // Generate chart config for new keys
+    if (updatedKeys.size > 0) {
+      const newKeys = Array.from(updatedKeys);
+      const chartConfigPrompt = getChartConfigPrompt(newKeys, userDescription);
+      
       try {
-        generatedChartChangeSchema = JSON.parse(chartChangeResponse);
-      } catch (parseError) {
-        console.error("Error parsing chart changes:", parseError);
-        return NextResponse.json({ error: "Invalid JSON format for chart changes." }, { status: 500 });
-      }
+        const chartConfigResponse = await openai.chat.completions.create({
+          model: "chatgpt-4o-latest",
+          messages: [
+            { role: "system", content: "Recommend chart types for new metrics" },
+            { role: "user", content: chartConfigPrompt }
+          ],
+          response_format: { type: "json_object" }
+        });
 
-      const { changes } = generatedChartChangeSchema;
-      if (!changes || !Array.isArray(changes) || changes.length === 0) {
-        return NextResponse.json({ error: "Failed to extract chart changes from user input." }, { status: 400 });
-      }
-
-      const validChartTypes = ["Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker"];
-      for (const change of changes) {
-        const { key, chartType } = change;
-        if (!key || !chartType || !validChartTypes.includes(chartType)) {
-          return NextResponse.json(
-            { error: "Invalid chart change request. Missing key or invalid chart type." },
-            { status: 400 },
+        if (chartConfigResponse.choices[0]?.message?.content) {
+          const chartConfig = JSON.parse(chartConfigResponse.choices[0].message.content);
+          await Promise.all(
+            Object.entries(chartConfig).map(([key, type]) => {
+              if (validChartTypes.includes(type as string)) {
+                return db.chartTypeConfig.upsert({
+                  where: { keyName: key },
+                  update: { chartType: type as string },
+                  create: { keyName: key, chartType: type as string }
+                });
+              }
+            })
           );
         }
+      } catch (error) {
+        console.error("Chart config generation failed:", error);
       }
-
-      const updatePromises = changes.map(async ({ key, chartType }) => {
-        const existingConfig = await db.chartTypeConfig.findUnique({ where: { keyName: key } });
-        if (existingConfig) {
-          return db.chartTypeConfig.update({ where: { keyName: key }, data: { chartType } });
-        } else {
-          return db.chartTypeConfig.create({ data: { keyName: key, chartType } });
-        }
-      });
-      await Promise.all(updatePromises);
-
-      return NextResponse.json(
-        {
-          message: `Successfully updated ${changes.length} chart type${changes.length === 1 ? "" : "s"}`,
-          changes: changes.map(({ key, chartType }) => ({ key, chartType })),
-        },
-        { status: 200 },
-      );
     }
 
-    // Normal data entry flow
+    // Update conversation history
     const updatedMessages = [
-      ...(conversation.messages as Array<{ role: string; content: string }>),
+      ...conversationHistory,
       { role: "user", content: userDescription },
+      { role: "assistant", content: JSON.stringify({ chartChanges, updates }) }
     ];
-
-    let cumulativeSchemaObj = await db.cumulativeSchema.findFirst();
-    let cumulativeSchema = cumulativeSchemaObj?.schema ?? null;
-
-    const existingDay = await db.day.findUnique({ where: { date } });
-
-    const userPrompt = getGenerateDaySchemaPrompt(userDescription, cumulativeSchema);
-
-    const daySchemaMessages = [
-      {
-        role: "system",
-        content:
-          "You are an AI assistant that generates JSON schemas based on prior conversation history.",
-      },
-      // Insert all previous conversation messages if relevant
-      ...updatedMessages,
-      // Then the final prompt user message for day schema
-      {
-        role: "user",
-        content: userPrompt,
-      },
-    ];
-
-    const daySchemaCompletion = await openai.chat.completions.create({
-      model: "chatgpt-4o-latest",
-      messages: daySchemaMessages as any,
-      response_format: { type: "json_object" },
-    });
-
-    const daySchemaResponse = daySchemaCompletion.choices[0]?.message?.content;
-    if (!daySchemaResponse) {
-      return NextResponse.json({ error: "Failed to generate day schema." }, { status: 500 });
-    }
-
-    const aiReply = { role: "assistant", content: daySchemaResponse };
-    updatedMessages.push(aiReply);
-
+    
     await db.conversation.update({
       where: { id: conversation.id },
-      data: { messages: updatedMessages as InputJsonValue },
+      data: { messages: updatedMessages as InputJsonValue }
     });
 
-    let generatedSchema;
-    try {
-      generatedSchema = JSON.parse(daySchemaResponse);
-    } catch (parseError) {
-      console.error("Error parsing day schema:", parseError);
-      return NextResponse.json({ error: "Invalid JSON format for day schema." }, { status: 500 });
-    }
+    return NextResponse.json({
+      message: "Processed actions successfully",
+      chartChanges: chartChanges.map(c => ({ key: c.key, chartType: c.chartType })),
+      updatedDays: processedDays,
+      updatedKeys: Array.from(updatedKeys)
+    });
 
-    if (existingDay && cumulativeSchemaObj) {
-      const updatedDaySchema = {
-        ...(existingDay.daySchema as Record<string, unknown>),
-        ...generatedSchema,
-      };
-      const updatedDay = await db.day.update({
-        where: { date },
-        data: { daySchema: updatedDaySchema },
-      });
-
-      const cumulativeUpdates = { ...(cumulativeSchemaObj.schema as Record<string, unknown>) };
-      Object.entries(generatedSchema).forEach(([key, value]) => {
-        if (!cumulativeUpdates[key]) {
-          cumulativeUpdates[key] = { example: value };
-        }
-      });
-
-      await db.cumulativeSchema.update({
-        where: { id: cumulativeSchemaObj.id },
-        data: { schema: cumulativeUpdates as InputJsonValue },
-      });
-
-      // Return updatedKeys for selective frontend updates
-      return NextResponse.json({
-        message: "Day schema updated and saved successfully.",
-        day: updatedDay,
-        updatedKeys: Object.keys(generatedSchema),
-      }, { status: 200 });
-    } else {
-      const keys = Object.keys(generatedSchema);
-      const chartConfigPrompt = getChartConfigPrompt(keys, userDescription);
-
-      const chartConfigCompletion = await openai.chat.completions.create({
-        model: "chatgpt-4o-latest",
-        messages: [
-          { role: "system", content: "You are an AI assistant that recommends chart types." },
-          { role: "user", content: chartConfigPrompt },
-        ],
-        response_format: { type: "json_object" },
-      });
-
-      const chartConfigResponse = chartConfigCompletion.choices[0]?.message?.content;
-      if (!chartConfigResponse) {
-        return NextResponse.json({ error: "Failed to generate chart configuration." }, { status: 500 });
-      }
-
-      let chartConfig;
-      try {
-        chartConfig = JSON.parse(chartConfigResponse);
-      } catch (parseError) {
-        console.error("Error parsing chartConfig:", parseError);
-        chartConfig = {};
-      }
-
-      const newDay = await db.day.create({
-        data: { date, daySchema: generatedSchema },
-      });
-
-      let cumulativeUpdates: any;
-      if (cumulativeSchemaObj) {
-        cumulativeUpdates = { ...(cumulativeSchemaObj.schema as Record<string, unknown>) };
-        Object.entries(generatedSchema).forEach(([key, value]) => {
-          if (!cumulativeUpdates[key]) {
-            cumulativeUpdates[key] = { example: value };
-          }
-        });
-        await db.cumulativeSchema.update({
-          where: { id: cumulativeSchemaObj.id },
-          data: { schema: cumulativeUpdates as InputJsonValue },
-        });
-      } else {
-        cumulativeUpdates = {};
-        Object.entries(generatedSchema).forEach(([key, value]) => {
-          cumulativeUpdates[key] = { example: value };
-        });
-        await db.cumulativeSchema.create({
-          data: { schema: cumulativeUpdates as InputJsonValue },
-        });
-      }
-
-      const validChartTypes = ["Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker"];
-      const chartTypeUpdates = Object.entries(chartConfig).map(async ([key, type]) => {
-        if (validChartTypes.includes(type as string)) {
-          const existingConfig = await db.chartTypeConfig.findUnique({ where: { keyName: key } });
-          if (!existingConfig) {
-            return db.chartTypeConfig.create({ data: { keyName: key, chartType: type as string } });
-          }
-        }
-      });
-
-      await Promise.all(chartTypeUpdates);
-
-      return NextResponse.json(
-        {
-          message: "Day schema generated and saved successfully.",
-          day: newDay,
-          chartConfig,
-          updatedKeys: Object.keys(generatedSchema),
-        },
-        { status: 201 },
-      );
-    }
   } catch (error: any) {
-    console.error("Error processing and saving schema:", error);
-    return NextResponse.json({ error: error.message || "An error occurred." }, { status: 500 });
+    console.error("Error processing request:", error);
+    return NextResponse.json(
+      { error: error.message || "An error occurred" },
+      { status: 500 }
+    );
   }
 }
