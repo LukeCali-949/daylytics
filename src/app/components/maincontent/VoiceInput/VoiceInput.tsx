@@ -11,6 +11,8 @@ import { motion } from "framer-motion";
 import { format } from "date-fns";
 
 import DynamicActivityTracker from "../../charts/DynamicActivityTracker";
+import DynamicTrackerChart from "../../charts/DynamicTrackerChart";
+import { buildContinuousData } from "~/app/utils/utilFunctions";
 
 export type chartTypes =
   | "Line"
@@ -18,7 +20,8 @@ export type chartTypes =
   | "Pie"
   | "ProgressBar"
   | "ProgressCircle"
-  | "Tracker";
+  | "Tracker"
+  | "ActivityCalendar";
 
 export default function VoiceInput() {
   const [transcribedText, setTranscribedText] = useState("");
@@ -46,15 +49,16 @@ export default function VoiceInput() {
       setIsFetchingDays(true);
       try {
         // 1. Fetch last 7 days
-        const daysResponse = await fetch("/api/db/getLast7Days", {
+        const daysResponse = await fetch("/api/db/getAllDays", {
           method: "GET",
         });
         const daysData = await daysResponse.json();
+        
         if (daysResponse.ok) {
           setAllDays(daysData.days);
         } else {
-          console.error("Error fetching last 7 days:", daysData.error);
-          toast.error("Error fetching last 7 days' schemas: " + daysData.error);
+          console.error("Error fetching days:", daysData.error);
+          toast.error("Error fetching days: " + daysData.error);
         }
 
         // 2. Fetch chart type configs
@@ -275,6 +279,16 @@ const prepareChartData = (key: string) => {
     return config?.chartType || "Line";
   };
 
+  const getChartData = (key: string) => {
+    // Build entire date range
+    const fullData = buildContinuousData(allDays, key);
+
+    // If we want to default to last 7 days, we can do:
+    // return fullData.slice(Math.max(0, fullData.length - 7));
+    // Or just return fullData for the entire timeline
+    return fullData;
+  };
+
   // Final list of keys we want to visualize
   const keysToVisualize = getKeysToVisualize();
 
@@ -315,7 +329,7 @@ const prepareChartData = (key: string) => {
                 return null;
               }
 
-              const chartData = prepareChartData(key);
+              const chartData = getChartData(key);
               return (
                 <motion.div
                   key={key}
@@ -335,6 +349,8 @@ const prepareChartData = (key: string) => {
           </p>
         )}
       </div>
+      
     </div>
   );
 }
+

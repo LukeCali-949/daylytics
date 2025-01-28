@@ -45,18 +45,22 @@ export async function POST(req: NextRequest) {
 
     // Check future dates
     const currentDate = new Date();
+    console.log("currentDate", currentDate);
     const inputDate = parseISO(date);
-    if (isFuture(inputDate)) {
-      return NextResponse.json(
-        { error: "Future dates are not allowed." },
-        { status: 400 }
-      );
-    }
+    // console.log("inputDate", inputDate);
+    // if (isFuture(inputDate)) {
+    //   return NextResponse.json(
+    //     { error: "Future dates are not allowed." },
+    //     { status: 400 }
+    //   );
+    // }
 
     // Retrieve or create conversation
     let conversation = await db.conversation.findFirst() || 
       await db.conversation.create({ data: { messages: [] } });
     const conversationHistory = conversation.messages as Array<{ role: string; content: string }>;
+
+    //console.log("conversationHistory", conversationHistory);
 
     // Parse user actions using combined parser
     const { chartChanges = [], updates = [] } = await parseUserActions(
@@ -65,7 +69,15 @@ export async function POST(req: NextRequest) {
     );
 
     // Process chart configuration changes
-    const validChartTypes = ["Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker"];
+    const validChartTypes = [
+      "Line",
+      "Bar",
+      "Pie",
+      "ProgressBar",
+      "ProgressCircle",
+      "Tracker",
+      "ActivityCalendar"
+    ];
     if (chartChanges.length > 0) {
       await Promise.all(
         chartChanges.map(async ({ key, chartType }) => {
@@ -87,7 +99,8 @@ export async function POST(req: NextRequest) {
 
     if (updates.length > 0) {
       // Get cumulative schema once
-      const cumulativeSchemaObj = await db.cumulativeSchema.findFirst();
+      let cumulativeSchemaObj = await db.cumulativeSchema.findFirst() || 
+        await db.cumulativeSchema.create({ data: { schema: {} } });
       cumulativeSchemaUpdates = cumulativeSchemaObj?.schema 
         ? { ...(cumulativeSchemaObj.schema as Record<string, any>) }
         : {};
@@ -127,9 +140,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      
+
       // Update cumulative schema
       await db.cumulativeSchema.upsert({
-        where: { id: cumulativeSchemaObj?.id || "" },
+        where: { id: cumulativeSchemaObj.id },
         update: { schema: cumulativeSchemaUpdates },
         create: { schema: cumulativeSchemaUpdates }
       });

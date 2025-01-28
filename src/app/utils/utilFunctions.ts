@@ -136,7 +136,7 @@ export const getChartConfigPrompt = (
   userDescription: string,
 ) => {
   return `
-    You are an AI assistant that recommends chart types ("Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker") for numerical metrics based on their key names and context.
+    You are an AI assistant that recommends chart types ("Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker", "ActivityCalendar") for numerical metrics based on their key names and context.
     Given the following keys: ${JSON.stringify(keys)}
     And considering the user's description: "${userDescription}"
     Output a JSON object mapping each key to its recommended chart type.
@@ -148,14 +148,14 @@ export const getChartConfigPrompt = (
     4. Otherwise, default to "Line" or "Bar" based on context (e.g., time series might be "Line", discrete comparisons might be "Bar").
 
     **IMPORTANT**:
-    - You should only return strings: "Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker".
+    - You should only return strings: "Line", "Bar", "Pie", "ProgressBar", "ProgressCircle", "Tracker", "ActivityCalendar".
     - The output must be a valid JSON object where each key maps to one of the above strings.
   `;
 };
 
 export const getChartChangeExtractionPrompt = (userInput: string) => `
 Extract all metric keys and their desired chart types from this request. 
-Valid chart types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker.
+Valid chart types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker, ActivityCalendar.
 
 Respond with JSON array of changes: {
   "changes": [
@@ -184,7 +184,7 @@ Example response: {
   ]
 }
 
-Input: "${userInput}"
+User input: "${userInput}"
 `;
 
 type IntentType = "chart_change_request" | "data_entry";
@@ -311,7 +311,9 @@ Return a JSON object with two arrays: "chartChanges" and "updates".
 
 CHART CHANGES:
 - Format: { "key": "metric_name", "chartType": "ValidChartType" }
-- Valid chart types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker
+- Valid chart types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker, ActivityCalendar
+- Only return valid chart types
+- Only include chart changes that are explicitly mentioned in the user's input
 
 DATA UPDATES:
 - Format: { "date": "YYYY-MM-DD", "key": "metric_name", "value": number, "goal?": number }
@@ -347,4 +349,59 @@ EXAMPLE RESPONSE FOR:
     console.error("Error parsing actions:", error, "Raw content:", rawContent);
     throw new Error("Invalid response format");
   }
+}
+
+
+import { parseISO, isValid, addDays, format } from "date-fns";
+
+/**
+ * Build a consecutive daily timeline from the earliest day in allDays -> today.
+ * For each date, if we have daySchema data for a particular key, use it; otherwise 0.
+ *
+ * Example return shape:
+ * [
+ *   { date: "2025-01-01", value: 2 },
+ *   { date: "2025-01-02", value: 0 },
+ *   ...
+ *   { date: "YYYY-MM-DD", value: <some number> },
+ * ]
+ */
+// utilFunctions.ts - Update buildContinuousData
+export function buildContinuousData(
+  allDays: any[],
+  key: string
+): Array<{ date: string; value: number }> {
+  if (!allDays || allDays.length === 0) return [];
+
+  // Clone and sort days ascending
+  const sortedDays = [...allDays].sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  // Get true earliest date from sorted array
+  const earliest = parseISO(sortedDays[0].date);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  // Create date map with proper fallbacks
+  const dayValueMap = new Map<string, number>();
+  sortedDays.forEach(day => {
+    const dateStr = format(parseISO(day.date), "yyyy-MM-dd");
+    dayValueMap.set(dateStr, day.daySchema?.[key]?.value ?? 0);
+  });
+
+  // Generate complete timeline
+  const results: Array<{ date: string; value: number }> = [];
+  let currentDate = new Date(earliest);
+
+  while (currentDate <= now) {
+    const isoDate = format(currentDate, "yyyy-MM-dd");
+    results.push({
+      date: isoDate,
+      value: dayValueMap.get(isoDate) ?? 0
+    });
+    currentDate = addDays(currentDate, 1);
+  }
+
+  return results;
 }
