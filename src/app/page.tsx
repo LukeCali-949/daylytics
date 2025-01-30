@@ -21,7 +21,7 @@ export default function HomePage() {
   };
   return (
     <div className="flex flex-col h-screen">
-      <header className="border-b flex-none">
+      {/* <header className="border-b flex-none">
         <div className="container mx-auto flex items-center justify-between px-4 py-4">
           <h1 className="text-2xl font-bold">Daylytics</h1>
           <div className="flex items-center space-x-4">
@@ -35,7 +35,7 @@ export default function HomePage() {
             </Button>
           </div>
         </div>
-      </header>
+      </header> */}
       
       <Vortex
         rangeY={800}
