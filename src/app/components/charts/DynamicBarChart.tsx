@@ -2,9 +2,7 @@
 "use client";
 
 import { BarChart } from "../extra/tremor/BarChartStuff";
-import { Card, Switch, Title, Subtitle } from "@tremor/react";
-
-// Adjust the import path as necessary to point to your BarChart component
+import { Title } from "@tremor/react";
 
 interface DynamicBarChartProps {
   keyName: string;
@@ -13,28 +11,26 @@ interface DynamicBarChartProps {
 
 const DynamicBarChart = ({ keyName, chartData }: DynamicBarChartProps) => {
   return (
-    <Card className="mb-6 w-[400px] rounded-lg border-2 border-gray-500 bg-[#131313] p-5 shadow-2xl">
-      <Title className="ml-5 text-xl font-semibold">
+    <div className="w-full h-full flex flex-col">
+      <Title className="text-l font-semibold mb-2 px-2">
         {formatKeyName(keyName)}
       </Title>
-      {/* <h4 className="mb-2 text-center font-semibold">
-        {formatKeyName(keyName)}
-      </h4> */}
-      <BarChart
-        className="h-80"
-        data={chartData.map((item) => ({ ...item, [keyName]: item.value }))}
-        index="date"
-        categories={[keyName]}
-        valueFormatter={(number: number) => `${number}`}
-        onValueChange={(v) => console.log(v)}
-        // xAxisLabel="Day"
-        yAxisLabel={"REPLACE THIS WITH UNITS"}
-      />
-    </Card>
+      <div className="flex-1 relative">
+        <BarChart
+          className="h-full w-full"
+          data={chartData}
+          index="date"
+          categories={["value"]}
+          colors={["cyan"]}
+          yAxisWidth={45}
+          valueFormatter={(number: number) => `${number}`}
+        />
+      </div>
+    </div>
   );
 };
 
-// Helper function to format key names (e.g., "wake_up_time" to "Wake Up Time")
+// Helper function to format key names 
 const formatKeyName = (key: string) => {
   return key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 };

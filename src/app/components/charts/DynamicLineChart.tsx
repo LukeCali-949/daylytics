@@ -1,7 +1,7 @@
 // components/charts/DynamicLineChart.tsx
 "use client";
 
-import { Card, Title } from "@tremor/react";
+import { Title } from "@tremor/react";
 import { LineChart } from "../extra/tremor/LineChartStuff";
 
 interface DynamicLineChartProps {
@@ -11,24 +11,28 @@ interface DynamicLineChartProps {
 
 const DynamicLineChart = ({ keyName, chartData }: DynamicLineChartProps) => {
   return (
-    <Card className="mb-6 w-[400px] rounded-lg border-2 border-gray-500 bg-[#131313] p-5 shadow-2xl">
-      <Title className="ml-5 text-xl font-semibold">
+    <div className="w-full h-full flex flex-col">
+      <Title className="text-l font-semibold mb-2 px-2">
         {formatKeyName(keyName)}
       </Title>
-      <LineChart
-        className="h-80"
-        data={chartData}
-        index="date"
-        categories={["value"]}
-        valueFormatter={(number: number) => `${number}`}
-        xAxisLabel="Day"
-        yAxisLabel={formatKeyName(keyName)}
-      />
-    </Card>
+      <div className="flex-1 relative">
+        <LineChart
+          className="h-full w-full"
+          data={chartData}
+          index="date"
+          categories={["value"]}
+          colors={["cyan"]} // Match bar chart color scheme
+          yAxisWidth={45}   // Match bar chart axis width
+          showLegend={false}
+          valueFormatter={(number: number) => `${number}`}
+          // Add any additional bar chart-specific props you need
+        />
+      </div>
+    </div>
   );
 };
 
-// Helper function to format key names (e.g., "wake_up_time" to "Wake Up Time")
+// Helper function to format key names (same as before)
 const formatKeyName = (key: string) => {
   return key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 };

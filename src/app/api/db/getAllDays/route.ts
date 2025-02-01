@@ -4,19 +4,18 @@ import { db } from "~/server/db";
 
 export async function GET(req: NextRequest) {
   try {
-    // Fetch all Day documents, sorted by date ascending
-    const allDays = await db.day.findMany({
+    const days = await db.day.findMany({
       orderBy: { date: "asc" },
     });
 
-    return NextResponse.json({ days: allDays }, { status: 200 });
+    const response = NextResponse.json({ days });
+    // Prevent caching
+    response.headers.set('Cache-Control', 'no-store, max-age=0');
+    return response;
   } catch (error: any) {
-    console.error("Error fetching day schemas:", error);
     return NextResponse.json(
-      {
-        error: error.message || "An error occurred while fetching day schemas.",
-      },
-      { status: 500 },
+      { error: error.message || "Failed to fetch days" },
+      { status: 500 }
     );
   }
 }
