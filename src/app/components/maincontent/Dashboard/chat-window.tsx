@@ -1,3 +1,6 @@
+// app/dashboard/page.tsx  (No changes needed here, it's already correct)
+
+// app/dashboard/chat-window.tsx (Sidebar - ALL the changes are here)
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -7,6 +10,7 @@ import { Input } from "~/components/ui/input";
 import { ScrollArea, ScrollBar } from "~/components/ui/scrollarea";
 import { Send, ChevronRight, ChevronLeft } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { useAuth } from "@clerk/nextjs";
 
 interface Message {
   role: "user" | "assistant";
@@ -16,22 +20,28 @@ interface Message {
 interface SidebarProps {
   className?: string;
   onSubmit: (message: string) => Promise<void>;
+  initialConversation: Message[]; // Add this prop
 }
 
-export function Sidebar({ className, onSubmit }: SidebarProps) {
+export function Sidebar({ className, onSubmit, initialConversation }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [message, setMessage] = useState("");
-  const [conversation, setConversation] = useState<Message[]>([]);
+  const [conversation, setConversation] = useState<Message[]>([]); // Initialize as empty
   const [isSending, setIsSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth()
+
+
   const fetchConversation = async () => {
     try {
-      const res = await fetch("/api/db/getConversationHistory");
-      if (res.ok) {
-        const data = await res.json();
-        setConversation(data.messages || []);
-      }
+      if(isSignedIn) { // ONLY fetch if signed in
+        const res = await fetch("/api/db/getConversationHistory");
+        if (res.ok) {
+          const data = await res.json();
+          setConversation(data.messages || []); // Keep existing if fetch fails.
+        }
+      } // No else:  Don't overwrite local state if not signed in.
     } catch (error) {
       console.error("Error fetching conversation:", error);
     }
@@ -39,7 +49,12 @@ export function Sidebar({ className, onSubmit }: SidebarProps) {
 
   useEffect(() => {
     fetchConversation();
-  }, []);
+  }, [isSignedIn]); // Important:  Re-fetch when sign-in status changes
+
+
+    useEffect(() => {
+        setConversation(initialConversation);
+    }, [initialConversation])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -53,15 +68,15 @@ export function Sidebar({ className, onSubmit }: SidebarProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) return;
-    
+
     setIsSending(true);
     const newMessage = message.trim();
-    
+
     try {
-      setConversation(prev => [...prev, { role: "user", content: newMessage }]);
+    //   setConversation(prev => [...prev, { role: "user", content: newMessage }]); // No longer needed here.
       setMessage("");
-      await onSubmit(newMessage);
-      await fetchConversation();
+      await onSubmit(newMessage);  // onSubmit handles the local state update
+    //   await fetchConversation(); // REMOVE THIS LINE.  Don't refetch.
     } finally {
       setIsSending(false);
     }
@@ -107,7 +122,7 @@ export function Sidebar({ className, onSubmit }: SidebarProps) {
                 </p>
               </div>
             )}
-            
+
             {conversation.map((msg, index) => (
               <div
                 key={index}

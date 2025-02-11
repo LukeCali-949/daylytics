@@ -371,6 +371,7 @@ export function buildContinuousData(
   allDays: any[],
   key: string
 ): Array<{ date: string; value: number }> {
+  console.log("allDays", allDays);
   if (!allDays || allDays.length === 0) return [];
 
   // Clone and sort days ascending
@@ -402,6 +403,6 @@ export function buildContinuousData(
     });
     currentDate = addDays(currentDate, 1);
   }
-
+  console.log("results", results);
   return results;
 }

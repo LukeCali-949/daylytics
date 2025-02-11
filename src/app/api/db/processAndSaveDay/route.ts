@@ -10,26 +10,36 @@ import {
   parseUserActions,
   UserActionResponse
 } from "~/app/utils/utilFunctions";
+import { currentUser } from '@clerk/nextjs/server'
+
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
+    const { userDescription, date } = await req.json();
+    const isoDate = date;
+
+    const user = await currentUser();
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 401 });
+    }
+
+    // Get the user from our database using Clerk ID
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: user.id }
+    });
+
+    if (!dbUser) {
+      return NextResponse.json({ error: "Database user not found" }, { status: 404 });
+    }
+
+    const userId = dbUser.id;
+
     // Validate API key
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "Missing OpenAI API Key." },
-        { status: 400 }
-      );
-    }
-
-    // Parse request body
-    const body = await req.json();
-    const { userDescription, date } = body;
-
-    if (!userDescription) {
-      return NextResponse.json(
-        { error: "User description is required." },
         { status: 400 }
       );
     }
@@ -55,9 +65,21 @@ export async function POST(req: NextRequest) {
     //   );
     // }
 
-    // Retrieve or create conversation
-    let conversation = await db.conversation.findFirst() || 
-      await db.conversation.create({ data: { messages: [] } });
+    // Find the user's existing conversation OR create a new one if it doesn't exist
+    let conversation = await db.conversation.findUnique({
+      where: { userId }
+    });
+
+    if (!conversation) {
+      conversation = await db.conversation.create({
+        data: {
+          userId, // ✅ Required field
+          messages: [] // Empty conversation history initially
+          }
+      });
+    }
+
+    // Retrieve the conversation history
     const conversationHistory = conversation.messages as Array<{ role: string; content: string }>;
 
     //console.log("conversationHistory", conversationHistory);
@@ -84,9 +106,15 @@ export async function POST(req: NextRequest) {
           if (!validChartTypes.includes(chartType)) return;
           
           return db.chartTypeConfig.upsert({
-            where: { keyName: key },
-            update: { chartType },
-            create: { keyName: key, chartType }
+            where: { 
+              userId_keyName: { userId, keyName: key }
+            },
+            update: { chartType: chartType as string },
+            create: { 
+              userId,
+              keyName: key, 
+              chartType: chartType as string 
+            }
           });
         })
       );
@@ -100,7 +128,7 @@ export async function POST(req: NextRequest) {
     if (updates.length > 0) {
       // Get cumulative schema once
       let cumulativeSchemaObj = await db.cumulativeSchema.findFirst() || 
-        await db.cumulativeSchema.create({ data: { schema: {} } });
+        await db.cumulativeSchema.create({ data: { userId, schema: {} } });
       cumulativeSchemaUpdates = cumulativeSchemaObj?.schema 
         ? { ...(cumulativeSchemaObj.schema as Record<string, any>) }
         : {};
@@ -121,14 +149,20 @@ export async function POST(req: NextRequest) {
         };
 
         // Update/create day document
-        const existingDay = await db.day.findUnique({ where: { date: isoDate } });
+        const existingDay = await db.day.findUnique({ 
+          where: { userId_date: { userId, date: isoDate } } 
+        });
         const updatedDay = existingDay
           ? await db.day.update({
-              where: { date: isoDate },
+              where: { userId_date: { userId, date: isoDate } },
               data: { daySchema: { ...(existingDay.daySchema as Record<string, any>), ...updateData } }
             })
           : await db.day.create({
-              data: { date: isoDate, daySchema: updateData }
+              data: { 
+                userId,
+                date: isoDate, 
+                daySchema: updateData 
+              }
             });
 
         processedDays.push(updatedDay);
@@ -146,7 +180,10 @@ export async function POST(req: NextRequest) {
       await db.cumulativeSchema.upsert({
         where: { id: cumulativeSchemaObj.id },
         update: { schema: cumulativeSchemaUpdates },
-        create: { schema: cumulativeSchemaUpdates }
+        create: { 
+          userId,
+          schema: cumulativeSchemaUpdates 
+        }
       });
     }
 
@@ -171,9 +208,15 @@ export async function POST(req: NextRequest) {
             Object.entries(chartConfig).map(([key, type]) => {
               if (validChartTypes.includes(type as string)) {
                 return db.chartTypeConfig.upsert({
-                  where: { keyName: key },
+                  where: { 
+                    userId_keyName: { userId, keyName: key }
+                  },
                   update: { chartType: type as string },
-                  create: { keyName: key, chartType: type as string }
+                  create: { 
+                    userId,
+                    keyName: key, 
+                    chartType: type as string 
+                  }
                 });
               }
             })

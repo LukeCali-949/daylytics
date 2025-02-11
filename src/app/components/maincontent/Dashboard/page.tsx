@@ -8,52 +8,162 @@ import { Navbar } from "./navbar";
 import { chartComponents } from "../../charts/chartRegistry";
 import { buildContinuousData } from "~/app/utils/utilFunctions";
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { useAuth } from "@clerk/nextjs";
+
+// Initial demo data for first-time visitors
+const DEMO_DAYS = [
+  {
+    date: new Date().toISOString().split('T')[0],
+    daySchema: {
+      programming_hours: { value: 4, goal: 6 },
+      exercise_minutes: { value: 30, goal: 45 },
+      meditation_minutes: { value: 15, goal: 20 },
+      water_glasses: { value: 6, goal: 8 }
+    }
+  }
+];
+
+interface ChartConfig {
+  keyName: string;
+  chartType: string;
+}
+
+interface Message { // Define message structure
+  role: "user" | "assistant";
+  content: string;
+}
 
 export default function DashboardPage() {
   const [allDays, setAllDays] = useState<any[]>([]);
   const [chartTypeConfigs, setChartTypeConfigs] = useState<Record<string, { chartType: string }>>({});
   const [refreshFlag, setRefreshFlag] = useState(0);
   const [isFetching, setIsFetching] = useState(false);
+    const [conversation, setConversation] = useState<Message[]>([]); // Add conversation state.
 
+  // New deletion state – separate for each row/slot type:
+  const [deletedTop, setDeletedTop] = useState(0);
+  const [deletedMiddleWide, setDeletedMiddleWide] = useState(0);
+  const [deletedMiddleSquares, setDeletedMiddleSquares] = useState(0);
+  const [deletedBottom, setDeletedBottom] = useState(0);
+  const [deletedBottomWide, setDeletedBottomWide] = useState(0);
+
+  const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth()
+
+
+  // Data fetching with proper cleanup
   useEffect(() => {
-    let isMounted = true;
-    const fetchData = async () => {
+    const loadData = async () => {
       setIsFetching(true);
       try {
-        const [daysResponse, chartConfigResponse] = await Promise.all([
-          fetch(`/api/db/getAllDays?refresh=${Date.now()}`),
-          fetch("/api/db/getChartTypeConfigs")
-        ]);
+        if (isSignedIn) {
+          // Authenticated - fetch from API
+          const [daysRes, configRes, conversationRes] = await Promise.all([
+            fetch(`/api/db/getAllDays?refresh=${Date.now()}`),
+            fetch("/api/db/getChartTypeConfigs"),
+            fetch("/api/db/getConversationHistory")  // Fetch conversation
+          ]);
 
-        if (isMounted) {
-          if (daysResponse.ok) {
-            const daysData = await daysResponse.json();
-            setAllDays(daysData.days);
-          }
-          if (chartConfigResponse.ok) {
-            const chartConfigData = await chartConfigResponse.json();
-            setChartTypeConfigs(
-              chartConfigData.chartTypeConfigs.reduce((acc: any, config: any) => ({
-                ...acc,
-                [config.keyName]: { chartType: config.chartType }
-              }), {})
-            );
-          }
+          const daysData = await daysRes.json();
+          const configData = await configRes.json();
+          const conversationData = await conversationRes.json(); // Parse conversation
+
+          setAllDays(daysData.days);
+          setChartTypeConfigs(configData.chartTypeConfigs.reduce((acc: Record<string, { chartType: string }>, config: ChartConfig) => ({
+            ...acc,
+            [config.keyName]: { chartType: config.chartType }
+          }), {}));
+          setConversation(conversationData.messages || []); // Set conversation state
+
+        } else {
+          // Unauthenticated - load from localStorage
+          const localDays = localStorage.getItem('demo_days');
+          const days = localDays ? JSON.parse(localDays) : DEMO_DAYS;
+          setAllDays(days);
+
+            // Load demo chart configs
+            const demoConfigs = {
+                programming_hours: { chartType: "ProgressBar" },
+                exercise_minutes: { chartType: "Line" },
+                meditation_minutes: { chartType: "ProgressCircle" },
+                water_glasses: { chartType: "Bar" }
+              };
+            setChartTypeConfigs(demoConfigs);
+
+
+          // Load conversation from localStorage
+          const localConversation = localStorage.getItem('demo_conversation');
+          const conversationData = localConversation ? JSON.parse(localConversation) : [];
+          setConversation(conversationData);
         }
       } catch (error) {
-        toast.error("Error fetching data");
+        toast.error("Error loading data");
       } finally {
-        if (isMounted) setIsFetching(false);
+        setIsFetching(false);
       }
     };
 
-    fetchData();
-    return () => { isMounted = false; };
-  }, [refreshFlag]);
+    loadData();
+  }, [isSignedIn, refreshFlag]);
 
+
+    // Save handler for both auth states
+  const handleSave = async (message: string) => {
+    console.log("Saving data...");
+
+    const newMessage: Message = { role: "user", content: message }; // New message obj
+    const updatedConversation = [...conversation, newMessage]; // Add to *local* state
+
+        setConversation(updatedConversation); // Update local conversation IMMEDIATELY
+
+
+    try {
+      const date = new Date().toISOString().split('T')[0];
+
+      if (isSignedIn) {
+        // Authenticated save
+        const response = await fetch("/api/db/processAndSaveDay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userDescription: message, date })
+        });
+
+        if (response.ok) {
+          setRefreshFlag(prev => prev + 1);
+          toast.success("Data updated successfully");
+          // No need to manually update conversation here; useEffect will re-fetch.
+        }
+
+      } else {
+        // Unauthenticated save to localStorage
+        console.log("Saving dataaa...");
+
+        const newDay = {
+          date,
+          daySchema: {
+            programming_hours: { value: Math.floor(Math.random() * 8) },
+            exercise_minutes: { value: Math.floor(Math.random() * 60) },
+            meditation_minutes: { value: Math.floor(Math.random() * 30) },
+            water_glasses: { value: Math.floor(Math.random() * 10) }
+          }
+        };
+
+        const updatedDays = [...allDays.filter(d => d.date !== date), newDay];
+        localStorage.setItem('demo_days', JSON.stringify(updatedDays));
+        setAllDays(updatedDays);
+        console.log(allDays);
+
+        // Save *entire conversation* to localStorage
+        localStorage.setItem('demo_conversation', JSON.stringify(updatedConversation));
+        toast.success("Demo data updated");
+      }
+    } catch (error) {
+      toast.error("Save failed");
+    }
+  };
+
+  // Create a stable list of keys (the metrics) to visualize.
   const keysToVisualize = Array.from(new Set(
     allDays.flatMap(day => Object.keys(day.daySchema))
   )).filter(key => {
@@ -64,6 +174,31 @@ export default function DashboardPage() {
   const getChartTypeForKey = (key: string) => chartTypeConfigs[key]?.chartType || "Line";
   const getChartData = (key: string) => buildContinuousData(allDays, key);
 
+  // --- Top Row (4 slots) ---
+  const topRowTarget = 4 - deletedTop;
+  const topCharts = keysToVisualize.slice(0, 4);
+  const topPlaceholdersCount = Math.max(0, topRowTarget - topCharts.length);
+
+  // --- Middle Row ---
+  // Left (wide) slot: key at index 4.
+  const middleWideChart = keysToVisualize[4];
+  // Right (square) slots: target is 2 minus deletedMiddleSquares.
+  const middleSquareTarget = 2 - deletedMiddleSquares;
+  // Instead of always slicing indices 5–7, we slice only as many as the target requires.
+  const middleSquareCharts = keysToVisualize.slice(5, 5 + middleSquareTarget);
+  const middleSquarePlaceholdersCount = Math.max(0, middleSquareTarget - middleSquareCharts.length);
+  // For the wide slot, if no key exists and it hasn't been deleted, we show the placeholder.
+  const showMiddleWidePlaceholder = !middleWideChart && deletedMiddleWide === 0;
+
+  // --- Bottom Row ---
+  // Square charts from indices 7 and 8
+  const bottomCharts = keysToVisualize.slice(7, 9);
+  const bottomRowTarget = 2 - deletedBottom;
+  const bottomPlaceholdersCount = Math.max(0, bottomRowTarget - bottomCharts.length);
+  // Wide chart for bottom row is from index 9
+  const hasBottomWideChart = !!keysToVisualize[9];
+  const showBottomWidePlaceholder = !hasBottomWideChart && deletedBottomWide === 0;
+
   return (
     <div className="flex flex-col h-screen">
       <Navbar />
@@ -73,8 +208,8 @@ export default function DashboardPage() {
             <div className="mx-auto max-w-[1052px] space-y-8">
               {/* Top Row - 4 equal squares */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {keysToVisualize.slice(0, 4).map((key, i) => (
-                  <ChartCard 
+                {topCharts.map((key, i) => (
+                  <ChartCard
                     key={key}
                     index={i}
                     chartKey={key}
@@ -82,47 +217,57 @@ export default function DashboardPage() {
                     chartData={getChartData(key)}
                   />
                 ))}
-                {Array.from({
-                  length: Math.max(0, 4 - keysToVisualize.length)
-                }).map((_, i) => (
-                  <PlaceholderCard key={`placeholder-${i}`} index={i} />
-                ))}
-              </div>
-
-              {/* Middle Row - 1 wide rectangle + 2 squares */}
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                <div className="lg:col-span-2">
-                  {keysToVisualize[4] ? (
-                    <WideChartCard
-                      key={keysToVisualize[4]}
-                      chartKey={keysToVisualize[4]}
-                      chartType={getChartTypeForKey(keysToVisualize[4])}
-                      chartData={getChartData(keysToVisualize[4])}
-                    />
-                  ) : (
-                    <PlaceholderWideCard label="Wide Chart 1" />
-                  )}
-                </div>
-                
-                {keysToVisualize.slice(5, 7).map((key, i) => (
-                  <ChartCard
-                    key={key}
-                    index={5 + i}
-                    chartKey={key}
-                    chartType={getChartTypeForKey(key)}
-                    chartData={getChartData(key)}
+                {Array.from({ length: topPlaceholdersCount }).map((_, i) => (
+                  <PlaceholderCard
+                    key={`placeholder-top-${i}`}
+                    index={i}
+                    onDelete={() => setDeletedTop(prev => prev + 1)}
                   />
                 ))}
-                {Array.from({
-                  length: Math.max(0, 2 - (keysToVisualize.length - 5))
-                }).map((_, i) => (
-                  <PlaceholderCard key={`placeholder-5-${i}`} index={5 + i} />
-                ))}
               </div>
 
-              {/* Bottom Row - 1 square + 2 wide rectangles */}
+              {/* Middle Row - 1 wide rectangle (left) + 2 squares (right) */}
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                {keysToVisualize.slice(7, 8).map((key, i) => (
+                <div className="lg:col-span-2">
+                  {middleWideChart ? (
+                    <WideChartCard
+                      key={middleWideChart}
+                      chartKey={middleWideChart}
+                      chartType={getChartTypeForKey(middleWideChart)}
+                      chartData={getChartData(middleWideChart)}
+                    />
+                  ) : (
+                    showMiddleWidePlaceholder && (
+                      <PlaceholderWideCard
+                        label="Wide Chart 1"
+                        onDelete={() => setDeletedMiddleWide(prev => prev + 1)}
+                      />
+                    )
+                  )}
+                </div>
+                <div className="lg:col-span-2 grid grid-cols-2 gap-4">
+                  {middleSquareCharts.map((key, i) => (
+                    <ChartCard
+                      key={key}
+                      index={5 + i}
+                      chartKey={key}
+                      chartType={getChartTypeForKey(key)}
+                      chartData={getChartData(key)}
+                    />
+                  ))}
+                  {Array.from({ length: middleSquarePlaceholdersCount }).map((_, i) => (
+                    <PlaceholderCard
+                      key={`placeholder-middle-${i}`}
+                      index={5 + i}
+                      onDelete={() => setDeletedMiddleSquares(prev => prev + 1)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Bottom Row - 2 squares (each 1 column) + 1 wide rectangle (spanning 2 columns) */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {bottomCharts.map((key, i) => (
                   <ChartCard
                     key={key}
                     index={7 + i}
@@ -131,26 +276,14 @@ export default function DashboardPage() {
                     chartData={getChartData(key)}
                   />
                 ))}
-                {Array.from({
-                  length: Math.max(0, 1 - (keysToVisualize.length - 7))
-                }).map((_, i) => (
-                  <PlaceholderCard key={`placeholder-7-${i}`} index={7 + i} />
+                {Array.from({ length: bottomPlaceholdersCount }).map((_, i) => (
+                  <PlaceholderCard
+                    key={`placeholder-bottom-${i}`}
+                    index={7 + i}
+                    onDelete={() => setDeletedBottom(prev => prev + 1)}
+                  />
                 ))}
-
-                <div className="lg:col-span-2">
-                  {keysToVisualize[8] ? (
-                    <WideChartCard
-                      key={keysToVisualize[8]}
-                      chartKey={keysToVisualize[8]}
-                      chartType={getChartTypeForKey(keysToVisualize[8])}
-                      chartData={getChartData(keysToVisualize[8])}
-                    />
-                  ) : (
-                    <PlaceholderWideCard label="Wide Chart 2" />
-                  )}
-                </div>
-
-                <div className="lg:col-span-2">
+                <div className="md:col-span-2">
                   {keysToVisualize[9] ? (
                     <WideChartCard
                       key={keysToVisualize[9]}
@@ -159,34 +292,22 @@ export default function DashboardPage() {
                       chartData={getChartData(keysToVisualize[9])}
                     />
                   ) : (
-                    <PlaceholderWideCard label="Wide Chart 3" />
+                    showBottomWidePlaceholder && (
+                      <PlaceholderWideCard
+                        label="Wide Chart 2"
+                        onDelete={() => setDeletedBottomWide(prev => prev + 1)}
+                      />
+                    )
                   )}
                 </div>
               </div>
             </div>
           </ScrollArea>
 
-          <Sidebar 
+          <Sidebar
             className="border-l dark:border-white/20"
-            onSubmit={async (message) => {
-              try {
-                const response = await fetch("/api/db/processAndSaveDay", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    userDescription: message,
-                    date: new Date().toISOString().split('T')[0]
-                  }),
-                });
-                
-                if (response.ok) {
-                  setRefreshFlag(prev => prev + 1);
-                  toast.success("Data updated successfully");
-                }
-              } catch (error) {
-                toast.error("Update failed");
-              }
-            }}
+            onSubmit={handleSave}
+            initialConversation={conversation} // Pass conversation
           />
         </div>
       </div>
@@ -194,10 +315,11 @@ export default function DashboardPage() {
   );
 }
 
-// Chart Card Components (remain the same)
+// ---------------- Chart Card Components ----------------
+
 const ChartCard = ({ chartKey, chartType, chartData, index }: any) => {
   const ChartComponent = chartComponents[chartType];
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -220,7 +342,7 @@ const ChartCard = ({ chartKey, chartType, chartData, index }: any) => {
 
 const WideChartCard = ({ chartKey, chartType, chartData }: any) => {
   const ChartComponent = chartComponents[chartType];
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -240,29 +362,59 @@ const WideChartCard = ({ chartKey, chartType, chartData }: any) => {
   );
 };
 
-const PlaceholderCard = ({ index }: { index: number }) => (
+interface PlaceholderProps {
+  index: number;
+  onDelete?: () => void;
+}
+
+const PlaceholderCard = ({ index, onDelete }: PlaceholderProps) => (
   <motion.div
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
-    className="relative w-full pt-[100%]"
+    className="relative w-full pt-[100%] group"
   >
     <Card className="absolute top-0 left-0 w-full h-full p-4 dark:bg-black dark:border-white/20">
-      <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">Chart {index + 1}</p>
+      <div className="relative w-full h-full">
+        {/* {onDelete && (
+          <button
+            onClick={onDelete}
+            className="absolute top-1 left-1 z-10 text-red-500 opacity-0 group-hover:opacity-100"
+          >
+            X
+          </button>
+        )} */}
+        <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
+          <p className="text-sm text-muted-foreground">Chart {index + 1}</p>
+        </div>
       </div>
     </Card>
   </motion.div>
 );
 
-const PlaceholderWideCard = ({ label }: { label: string }) => (
+interface PlaceholderWideProps {
+  label: string;
+  onDelete?: () => void;
+}
+
+const PlaceholderWideCard = ({ label, onDelete }: PlaceholderWideProps) => (
   <motion.div
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
-    className="relative w-full pt-[50%]"
+    className="relative w-full pt-[50%] group"
   >
     <Card className="absolute top-0 left-0 w-full h-full p-4 dark:bg-black dark:border-white/20">
-      <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">{label}</p>
+      <div className="relative w-full h-full">
+        {/* {onDelete && (
+          <button
+            onClick={onDelete}
+            className="absolute top-1 left-1 z-10 text-red-500 opacity-0 group-hover:opacity-100"
+          >
+            X
+          </button>
+        )} */}
+        <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
+          <p className="text-sm text-muted-foreground">{label}</p>
+        </div>
       </div>
     </Card>
   </motion.div>

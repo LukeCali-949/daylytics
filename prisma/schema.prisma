@@ -1,5 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -10,33 +9,69 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// -------------------- User Model --------------------
+model User {
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  clerkId           String             @unique // The Clerk user ID
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Relationships
+  days              Day[]
+  conversation      Conversation?
+  cumulativeSchema  CumulativeSchema?
+  chartConfigs      ChartTypeConfig[]
+}
+
+// -------------------- Day Model --------------------
 model Day {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID field
-  date        String @unique                           
-  daySchema   Json                                        // JSON representation of the day's data
-  createdAt   DateTime @default(now())                    // Auto-set creation timestamp
-  updatedAt   DateTime @updatedAt                         // Auto-set last updated timestamp
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  date        String   @map("date")
+  daySchema   Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationship to User
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date]) // Ensure each user only has one entry per date
 }
 
-model ChartTypeConfig {
-  id        String @id @default(auto()) @map("_id") @db.ObjectId
-  keyName   String @unique
-  chartType String
-}
-
-model CumulativeSchema {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId // MongoDB-specific ID
-  schema    Json     // Holds the cumulative schema with types or metadata
-  createdAt DateTime @default(now()) // When the cumulative schema was first created
-  updatedAt DateTime @updatedAt      // Auto-updated on schema changes
-}
-
+// -------------------- Conversation Model (One Per User) --------------------
 model Conversation {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId     String?
+  userId     String   @unique @db.ObjectId
   messages   Json
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  // One-to-One Relationship with User (Only Defined Here)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// -------------------- Cumulative Schema (One Per User) --------------------
+model CumulativeSchema {
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String  @unique @db.ObjectId
+  schema    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  // One-to-One Relationship with User (Only Defined Here)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// -------------------- Chart Type Config (Many Per User) --------------------
+model ChartTypeConfig {
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String  @db.ObjectId
+  keyName   String
+  chartType String
+
+  // Relationship to User
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Prevent duplicate chart configs per user
+  @@unique([userId, keyName]) 
+}

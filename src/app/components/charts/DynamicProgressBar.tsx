@@ -15,6 +15,7 @@ const DynamicProgressBar: React.FC<ProgressBarProps> = ({
   chartData,
 }) => {
   // Calculate total value
+  console.log(chartData);
   const totalValue = chartData.reduce((sum, dp) => sum + (dp.value || 0), 0);
 
   // Find most recent goal
