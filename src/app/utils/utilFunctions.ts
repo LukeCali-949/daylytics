@@ -351,6 +351,100 @@ EXAMPLE RESPONSE FOR:
   }
 }
 
+export async function parseUserActions2(
+  userInput: string,
+  conversation: Array<{ role: string; content: string }>,
+  cumulativeSchema: JsonValue
+): Promise<UserActionResponse> {
+  const todayDate = new Date().toISOString().split('T')[0];
+  const prompt = `
+Analyze user input and generate two types of actions: chart configuration changes and data updates.
+Use the cumulative schema to maintain consistency with existing data structures and measurement units.
+
+CUMULATIVE SCHEMA CONTEXT:
+${
+  cumulativeSchema 
+    ? JSON.stringify(cumulativeSchema, null, 2)
+    : "No existing schema found. Create new metrics as needed."
+}
+
+TASKS:
+1. CHART CONFIGURATION:
+- Format: { "key": "metric_name", "chartType": "ValidChartType" }
+- Valid types: Line, Bar, Pie, ProgressBar, ProgressCircle, Tracker, ActivityCalendar
+- Only include EXPLICIT chart change requests
+- Maintain existing chart types if not mentioned
+
+2. DATA UPDATES:
+- Format: { "date": "YYYY-MM-DD", "key": "metric_name", "value": number, "goal?": number }
+- Resolve relative dates using today (${todayDate})
+- Use existing metric formats from cumulative schema
+- For new metrics, infer type from context:
+  - Time: integer (minutes/hours)
+  - Yes/No: 1/0
+  - Count: integer
+  - Money: number
+
+RULES:
+- PRESERVE existing schema structure for known metrics
+- For schema metrics, use EXACTLY the format from their "example" field
+- Convert relative time references to 24h integers (e.g., "7 AM" → 700)
+- Future dates → default to ${todayDate}
+- Explicit goals → include "goal" field
+- Implicit goals → omit unless clearly stated
+
+USER INPUT: "${userInput}"
+
+EXAMPLE RESPONSE FOR:
+"change coding hours to ProgressBar and logged 5h yesterday against weekly goal of 30h"
+{
+  "chartChanges": [{ "key": "coding_hours", "chartType": "ProgressBar" }],
+  "updates": [
+    {
+      "date": "${getYesterdayDate()}",
+      "key": "coding_hours",
+      "value": 5,
+      "goal": 30
+    }
+  ]
+}
+`;
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const response = await openai.chat.completions.create({
+  model: "chatgpt-4o-latest",
+  messages: [
+    {
+      role: "system",
+      content: "You are a JSON-focused assistant. Always respond with valid JSON."
+    },
+    ...conversation,
+    {
+      role: "user",
+      content: `${prompt}\n\nRespond with a JSON object only.`
+    }
+  ] as ChatCompletionMessageParam[],
+  response_format: { type: "json_object" },
+});
+
+const rawContent = response.choices[0]?.message?.content;
+if (!rawContent) throw new Error("No response from OpenAI");
+
+try {
+  return JSON.parse(rawContent) as UserActionResponse;
+} catch (error) {
+  console.error("Error parsing actions:", error, "Raw content:", rawContent);
+  throw new Error("Invalid response format");
+}
+}
+
+// Helper function
+function getYesterdayDate(): string {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return date.toISOString().split('T')[0]!;
+}
+
 
 import { parseISO, isValid, addDays, format } from "date-fns";
 

@@ -8,6 +8,7 @@ import {
   getChartConfigPrompt,
   getGenerateDaySchemaPrompt,
   parseUserActions,
+  parseUserActions2,
   UserActionResponse
 } from "~/app/utils/utilFunctions";
 import { currentUser } from '@clerk/nextjs/server'
@@ -83,11 +84,14 @@ export async function POST(req: NextRequest) {
     const conversationHistory = conversation.messages as Array<{ role: string; content: string }>;
 
     //console.log("conversationHistory", conversationHistory);
+    let cumulativeSchemaObj = await db.cumulativeSchema.findFirst() || 
+        await db.cumulativeSchema.create({ data: { userId, schema: {} } });
 
     // Parse user actions using combined parser
-    const { chartChanges = [], updates = [] } = await parseUserActions(
+    const { chartChanges = [], updates = [] } = await parseUserActions2(
       userDescription,
-      conversationHistory
+      conversationHistory,
+      cumulativeSchemaObj.schema
     );
 
     // Process chart configuration changes
@@ -127,8 +131,7 @@ export async function POST(req: NextRequest) {
 
     if (updates.length > 0) {
       // Get cumulative schema once
-      let cumulativeSchemaObj = await db.cumulativeSchema.findFirst() || 
-        await db.cumulativeSchema.create({ data: { userId, schema: {} } });
+      
       cumulativeSchemaUpdates = cumulativeSchemaObj?.schema 
         ? { ...(cumulativeSchemaObj.schema as Record<string, any>) }
         : {};

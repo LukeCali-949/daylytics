@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 "use client";
 
 import { Card } from "~/components/ui/card";
@@ -11,28 +10,28 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { useAuth } from "@clerk/nextjs";
-
-// Initial demo data for first-time visitors
-const DEMO_DAYS = [
-  {
-    date: new Date().toISOString().split('T')[0],
-    daySchema: {
-      programming_hours: { value: 4, goal: 6 },
-      exercise_minutes: { value: 30, goal: 45 },
-      meditation_minutes: { value: 15, goal: 20 },
-      water_glasses: { value: 6, goal: 8 }
-    }
-  }
-];
+import { initializeLocalStorage } from "~/app/utils/localStorageHelpers";
 
 interface ChartConfig {
   keyName: string;
   chartType: string;
 }
 
-interface Message { // Define message structure
+interface Message {
   role: "user" | "assistant";
   content: string;
+}
+
+interface DayUpdate {
+  date: string;
+  key: string;
+  value: number;
+  goal?: number;
+}
+
+interface Day {
+  date: string;
+  daySchema: Record<string, any>;
 }
 
 export default function DashboardPage() {
@@ -40,7 +39,7 @@ export default function DashboardPage() {
   const [chartTypeConfigs, setChartTypeConfigs] = useState<Record<string, { chartType: string }>>({});
   const [refreshFlag, setRefreshFlag] = useState(0);
   const [isFetching, setIsFetching] = useState(false);
-    const [conversation, setConversation] = useState<Message[]>([]); // Add conversation state.
+  const [conversation, setConversation] = useState<Message[]>([]);
 
   // New deletion state – separate for each row/slot type:
   const [deletedTop, setDeletedTop] = useState(0);
@@ -49,8 +48,7 @@ export default function DashboardPage() {
   const [deletedBottom, setDeletedBottom] = useState(0);
   const [deletedBottomWide, setDeletedBottomWide] = useState(0);
 
-  const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth()
-
+  const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth();
 
   // Data fetching with proper cleanup
   useEffect(() => {
@@ -67,30 +65,31 @@ export default function DashboardPage() {
 
           const daysData = await daysRes.json();
           const configData = await configRes.json();
-          const conversationData = await conversationRes.json(); // Parse conversation
+          const conversationData = await conversationRes.json();
 
           setAllDays(daysData.days);
-          setChartTypeConfigs(configData.chartTypeConfigs.reduce((acc: Record<string, { chartType: string }>, config: ChartConfig) => ({
-            ...acc,
-            [config.keyName]: { chartType: config.chartType }
-          }), {}));
-          setConversation(conversationData.messages || []); // Set conversation state
-
+          setChartTypeConfigs(
+            configData.chartTypeConfigs.reduce((acc: Record<string, { chartType: string }>, config: ChartConfig) => ({
+              ...acc,
+              [config.keyName]: { chartType: config.chartType }
+            }), {})
+          );
+          setConversation(conversationData.messages || []);
         } else {
           // Unauthenticated - load from localStorage
           const localDays = localStorage.getItem('demo_days');
-          const days = localDays ? JSON.parse(localDays) : DEMO_DAYS;
+          const days = localDays ? JSON.parse(localDays) : [];
           setAllDays(days);
 
-            // Load demo chart configs
-            const demoConfigs = {
-                programming_hours: { chartType: "ProgressBar" },
-                exercise_minutes: { chartType: "Line" },
-                meditation_minutes: { chartType: "ProgressCircle" },
-                water_glasses: { chartType: "Bar" }
-              };
-            setChartTypeConfigs(demoConfigs);
-
+          // Load chart configs from localStorage or use defaults
+          const localConfigs = localStorage.getItem('demo_chart_configs');
+          const demoConfigs = localConfigs ? JSON.parse(localConfigs) : {
+            programming_hours: { chartType: "ProgressBar" },
+            exercise_hours: { chartType: "Bar" },
+            sleep_hours: { chartType: "Line" },
+            reading_hours: { chartType: "ProgressCircle" }
+          };
+          setChartTypeConfigs(demoConfigs);
 
           // Load conversation from localStorage
           const localConversation = localStorage.getItem('demo_conversation');
@@ -107,19 +106,22 @@ export default function DashboardPage() {
     loadData();
   }, [isSignedIn, refreshFlag]);
 
+  useEffect(() => {
+    if (!isSignedIn) {
+      initializeLocalStorage();
+    }
+  }, [isSignedIn]);
 
-    // Save handler for both auth states
+  // Save handler for both auth states
   const handleSave = async (message: string) => {
     console.log("Saving data...");
 
-    const newMessage: Message = { role: "user", content: message }; // New message obj
-    const updatedConversation = [...conversation, newMessage]; // Add to *local* state
-
-        setConversation(updatedConversation); // Update local conversation IMMEDIATELY
-
+    const newMessage: Message = { role: "user", content: message };
+    const updatedConversation = [...conversation, newMessage];
+    setConversation(updatedConversation);
 
     try {
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toISOString().split("T")[0];
 
       if (isSignedIn) {
         // Authenticated save
@@ -132,42 +134,73 @@ export default function DashboardPage() {
         if (response.ok) {
           setRefreshFlag(prev => prev + 1);
           toast.success("Data updated successfully");
-          // No need to manually update conversation here; useEffect will re-fetch.
         }
-
       } else {
-        // Unauthenticated save to localStorage
-        console.log("Saving dataaa...");
+        // Unauthenticated (demo) save:
+        const date = new Date().toISOString().split("T")[0];
 
-        const newDay = {
-          date,
-          daySchema: {
-            programming_hours: { value: Math.floor(Math.random() * 8) },
-            exercise_minutes: { value: Math.floor(Math.random() * 60) },
-            meditation_minutes: { value: Math.floor(Math.random() * 30) },
-            water_glasses: { value: Math.floor(Math.random() * 10) }
+        const response = await fetch("/api/signedoutprocessAndSaveDay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userDescription: message,
+            date,
+            conversation: JSON.parse(localStorage.getItem("demo_conversation") || "[]"),
+            cumulativeSchema: JSON.parse(localStorage.getItem("demo_cumulativeSchema") || "{}")
+          })
+        });
+
+        const result = await response.json();
+
+        // Store results back into localStorage
+        localStorage.setItem("demo_conversation", JSON.stringify(result.updatedConversation));
+        localStorage.setItem("demo_cumulativeSchema", JSON.stringify(result.cumulativeSchemaUpdates));
+
+        // Merge day updates into demo_days
+        const localDays = JSON.parse(localStorage.getItem("demo_days") || "[]");
+        result.updates.forEach((update: DayUpdate) => {
+          // Build the update data to match the expected structure
+          const updateData = update.goal !== undefined 
+            ? { value: update.value, goal: update.goal }
+            : { value: update.value };
+
+          const existingDay = localDays.find((day: Day) => day.date === update.date);
+          if (existingDay) {
+            existingDay.daySchema = { ...existingDay.daySchema, [update.key]: updateData };
+          } else {
+            localDays.push({
+              date: update.date,
+              daySchema: { [update.key]: updateData }
+            });
           }
-        };
+        });
+        localStorage.setItem("demo_days", JSON.stringify(localDays));
 
-        const updatedDays = [...allDays.filter(d => d.date !== date), newDay];
-        localStorage.setItem('demo_days', JSON.stringify(updatedDays));
-        setAllDays(updatedDays);
-        console.log(allDays);
+       // Store chart type configurations
+        const demoChartConfigs = JSON.parse(localStorage.getItem("demo_chart_configs") || "{}");
+        const updatedConfigs = result.chartChanges.reduce((acc: any, change: { key: string; chartType: string }) => {
+          acc[change.key] = { chartType: change.chartType };
+          return acc;
+        }, {});
+        Object.assign(demoChartConfigs, updatedConfigs);
+        localStorage.setItem("demo_chart_configs", JSON.stringify(demoChartConfigs));
 
-        // Save *entire conversation* to localStorage
-        localStorage.setItem('demo_conversation', JSON.stringify(updatedConversation));
+
         toast.success("Demo data updated");
+        // Update the refresh flag so that charts re-render like for signed-in users.
+        setRefreshFlag(prev => prev + 1);
       }
     } catch (error) {
+      console.error("Error saving data:", error);
       toast.error("Save failed");
     }
   };
 
   // Create a stable list of keys (the metrics) to visualize.
   const keysToVisualize = Array.from(new Set(
-    allDays.flatMap(day => Object.keys(day.daySchema))
-  )).filter(key => {
-    const count = allDays.filter(day => day.daySchema[key]).length;
+    allDays.flatMap((day: any) => Object.keys(day.daySchema))
+  )).filter((key) => {
+    const count = allDays.filter((day: any) => day.daySchema[key]).length;
     return count >= 0;
   });
 
@@ -307,7 +340,7 @@ export default function DashboardPage() {
           <Sidebar
             className="border-l dark:border-white/20"
             onSubmit={handleSave}
-            initialConversation={conversation} // Pass conversation
+            initialConversation={conversation}
           />
         </div>
       </div>
@@ -375,14 +408,14 @@ const PlaceholderCard = ({ index, onDelete }: PlaceholderProps) => (
   >
     <Card className="absolute top-0 left-0 w-full h-full p-4 dark:bg-black dark:border-white/20">
       <div className="relative w-full h-full">
-        {/* {onDelete && (
+        {onDelete && (
           <button
             onClick={onDelete}
             className="absolute top-1 left-1 z-10 text-red-500 opacity-0 group-hover:opacity-100"
           >
             X
           </button>
-        )} */}
+        )}
         <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
           <p className="text-sm text-muted-foreground">Chart {index + 1}</p>
         </div>
@@ -404,14 +437,14 @@ const PlaceholderWideCard = ({ label, onDelete }: PlaceholderWideProps) => (
   >
     <Card className="absolute top-0 left-0 w-full h-full p-4 dark:bg-black dark:border-white/20">
       <div className="relative w-full h-full">
-        {/* {onDelete && (
+        {onDelete && (
           <button
             onClick={onDelete}
             className="absolute top-1 left-1 z-10 text-red-500 opacity-0 group-hover:opacity-100"
           >
             X
           </button>
-        )} */}
+        )}
         <div className="w-full h-full rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
           <p className="text-sm text-muted-foreground">{label}</p>
         </div>
